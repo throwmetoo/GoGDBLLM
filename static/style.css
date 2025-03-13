@@ -91,3 +91,15 @@
         right: -300px;
     }
 }
+
+/* Add these styles to your existing CSS */
+.disabled-btn {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.upload-message {
+    color: #ff3333;
+    margin-top: 10px;
+    font-size: 14px;
+}

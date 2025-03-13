@@ -22,19 +22,32 @@ let terminalConnected = false;
 // Add these at the top with your other constants
 const MODEL_OPTIONS = {
     anthropic: [
+        { id: "claude-3-5-sonnet-20240620", name: "Claude 3.5 Sonnet" },
+        { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet" },
         { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
         { id: "claude-3-sonnet-20240229", name: "Claude 3 Sonnet" },
-        { id: "claude-2.1", name: "Claude 2.1" }
+        { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku" },
+        { id: "claude-2.1", name: "Claude 2.1" },
+        { id: "claude-2.0", name: "Claude 2.0" },
+        { id: "claude-instant-1.2", name: "Claude Instant 1.2" }
     ],
     openai: [
-        { id: "gpt-4-turbo-preview", name: "GPT-4 Turbo" },
+        { id: "gpt-4o", name: "GPT-4o" },
+        { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
         { id: "gpt-4", name: "GPT-4" },
         { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" }
     ],
     openrouter: [
+        { id: "anthropic/claude-3-5-sonnet", name: "Claude 3.5 Sonnet" },
+        { id: "anthropic/claude-3-7-sonnet", name: "Claude 3.7 Sonnet" },
         { id: "anthropic/claude-3-opus", name: "Claude 3 Opus" },
-        { id: "openai/gpt-4-turbo-preview", name: "GPT-4 Turbo" },
-        { id: "google/gemini-pro", name: "Gemini Pro" }
+        { id: "anthropic/claude-3-sonnet", name: "Claude 3 Sonnet" },
+        { id: "anthropic/claude-3-haiku", name: "Claude 3 Haiku" },
+        { id: "openai/gpt-4o", name: "GPT-4o" },
+        { id: "openai/gpt-4-turbo", name: "GPT-4 Turbo" },
+        { id: "google/gemini-1.5-pro", name: "Gemini 1.5 Pro" },
+        { id: "google/gemini-1.5-flash", name: "Gemini 1.5 Flash" },
+        { id: "meta-llama/llama-3-70b-instruct", name: "Llama 3 70B" }
     ]
 };
 
@@ -124,12 +137,24 @@ function setupEventListeners() {
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
   
   // Initialize settings
-  loadSettings();
+  loadSettings().then(() => {
+    // Check upload button state after settings are loaded
+    updateUploadButtonState();
+  });
 
   document.getElementById('testConnection').addEventListener('click', testConnection);
 
   // Add notification close button listener
   document.querySelector('.notification-close').addEventListener('click', hideNotification);
+  
+  // Add provider change listener to update button state
+  document.getElementById('provider').addEventListener('change', updateModelOptions);
+  
+  // Add save settings success handler
+  document.getElementById('saveSettings').addEventListener('click', () => {
+    // Update upload button state after settings are saved
+    setTimeout(updateUploadButtonState, 500);
+  });
 }
 
 // Set up chat panel functionality
@@ -170,11 +195,65 @@ function showSection(sectionId) {
   }
 }
 
-// Handle file upload button click
+// Add this function to check if settings are valid
+async function validateSettings() {
+  try {
+    // First check if we have settings stored
+    if (!currentSettings.apiKey) {
+      showNotification('Please configure your AI provider settings first', 'error');
+      showSection('settingsSection');
+      return false;
+    }
+    
+    // Test the connection to verify settings are valid
+    const testBtn = document.getElementById('testConnection');
+    const saveBtn = document.getElementById('saveSettings');
+    testBtn.disabled = true;
+    saveBtn.disabled = true;
+    
+    window.appendToTerminal('Validating AI provider connection...');
+    
+    const response = await fetch('/test-connection', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        provider: currentSettings.provider,
+        model: currentSettings.model,
+        apiKey: currentSettings.apiKey
+      })
+    });
+    
+    testBtn.disabled = false;
+    saveBtn.disabled = false;
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      showNotification(`Invalid AI settings: ${errorText}`, 'error');
+      showSection('settingsSection');
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    showNotification(`Error validating settings: ${error.message}`, 'error');
+    showSection('settingsSection');
+    return false;
+  }
+}
+
+// Update the handleFileUpload function to validate settings first
 async function handleFileUpload() {
   const file = fileInput.files[0];
   if (!file) {
     alert("Please select a file first");
+    return;
+  }
+
+  // Validate settings before proceeding
+  const settingsValid = await validateSettings();
+  if (!settingsValid) {
     return;
   }
 
@@ -516,4 +595,48 @@ function hideNotification() {
         notification.style.display = 'none';
         notification.style.animation = '';
     }, 300);
+}
+
+// Add this function to check and update upload button state
+async function updateUploadButtonState() {
+  try {
+    const response = await fetch('/settings');
+    if (!response.ok) {
+      uploadBtn.disabled = true;
+      return;
+    }
+    
+    const settings = await response.json();
+    if (!settings.apiKey) {
+      uploadBtn.disabled = true;
+      uploadBtn.title = "Configure AI settings first";
+      
+      // Add a visual indicator
+      uploadBtn.classList.add("disabled-btn");
+      
+      // Add a message near the upload button
+      const uploadMessage = document.createElement('div');
+      uploadMessage.id = 'uploadMessage';
+      uploadMessage.className = 'upload-message';
+      uploadMessage.textContent = 'Please configure AI settings before uploading';
+      
+      // Insert the message after the upload button
+      if (!document.getElementById('uploadMessage')) {
+        uploadBtn.parentNode.insertBefore(uploadMessage, uploadBtn.nextSibling);
+      }
+    } else {
+      uploadBtn.disabled = false;
+      uploadBtn.title = "Upload file";
+      uploadBtn.classList.remove("disabled-btn");
+      
+      // Remove the message if it exists
+      const uploadMessage = document.getElementById('uploadMessage');
+      if (uploadMessage) {
+        uploadMessage.remove();
+      }
+    }
+  } catch (error) {
+    console.error('Error checking settings:', error);
+    uploadBtn.disabled = true;
+  }
 }
