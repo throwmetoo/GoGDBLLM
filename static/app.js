@@ -180,6 +180,9 @@ function setupChatPanel() {
   closeChatBtn.addEventListener("click", () => {
     chatPanel.classList.remove("open");
   });
+
+  // Add resize functionality
+  setupChatResize();
 }
 
 // Show the specified section and hide others
@@ -206,52 +209,98 @@ function showSection(sectionId) {
   }
 }
 
-// Add this function to check if settings are valid
+// Function to load settings
+async function loadSettings() {
+    try {
+        console.log("Loading settings...");
+        const response = await fetch('/api/settings');
+        if (!response.ok) {
+            console.error("Failed to load settings:", response.status, response.statusText);
+            throw new Error(`Failed to load settings: ${response.status} ${response.statusText}`);
+        }
+        
+        const settings = await response.json();
+        console.log("Loaded settings:", settings);
+        
+        currentSettings = {
+            provider: settings.provider || 'anthropic',
+            model: settings.model || MODEL_OPTIONS.anthropic[0].id,
+            apiKey: settings.apiKey || ''
+        };
+        
+        // Update UI
+        document.getElementById('provider').value = currentSettings.provider;
+        document.getElementById('apiKey').value = currentSettings.apiKey;
+        updateModelOptions();
+        
+        // Make sure to set the model after updating options
+        setTimeout(() => {
+            const modelSelect = document.getElementById('model');
+            if (modelSelect.querySelector(`option[value="${currentSettings.model}"]`)) {
+                modelSelect.value = currentSettings.model;
+            } else {
+                // If the model doesn't exist in the options, select the first one
+                currentSettings.model = modelSelect.options[0].value;
+            }
+            
+            // Update the model info in the chat panel
+            updateCurrentModelDisplay();
+        }, 100);
+        
+        return settings.apiKey && settings.apiKey.trim() !== '';
+    } catch (error) {
+        console.error('Error loading settings:', error);
+        // Fall back to defaults
+        currentSettings = {
+            provider: 'anthropic',
+            model: MODEL_OPTIONS.anthropic[0].id,
+            apiKey: ''
+        };
+        
+        document.getElementById('provider').value = currentSettings.provider;
+        updateModelOptions();
+        return false;
+    }
+}
+
+// Function to update the current model display in the chat panel
+function updateCurrentModelDisplay() {
+    const currentModelElement = document.getElementById('currentModel');
+    if (currentModelElement) {
+        const modelOptions = MODEL_OPTIONS[currentSettings.provider] || [];
+        const modelInfo = modelOptions.find(m => m.id === currentSettings.model);
+        currentModelElement.textContent = modelInfo ? modelInfo.name : currentSettings.model;
+    }
+}
+
+// Function to validate settings
 async function validateSettings() {
-  try {
-    // First check if we have settings stored
-    if (!currentSettings.apiKey) {
-      showNotification('Please configure your AI provider settings first', 'error');
-      showSection('settingsSection');
-      return false;
+    try {
+        console.log("Validating settings...");
+        const response = await fetch('/api/settings');
+        if (!response.ok) {
+            console.error("Failed to validate settings:", response.status, response.statusText);
+            return false;
+        }
+        
+        const settings = await response.json();
+        console.log("Validated settings:", settings);
+        
+        // Update current settings
+        currentSettings = {
+            provider: settings.provider || 'anthropic',
+            model: settings.model || MODEL_OPTIONS.anthropic[0].id,
+            apiKey: settings.apiKey || ''
+        };
+        
+        // Update the model info in the chat panel
+        updateCurrentModelDisplay();
+        
+        return settings.apiKey && settings.apiKey.trim() !== '';
+    } catch (error) {
+        console.error('Error validating settings:', error);
+        return false;
     }
-    
-    // Test the connection to verify settings are valid
-    const testBtn = document.getElementById('testConnection');
-    const saveBtn = document.getElementById('saveSettings');
-    testBtn.disabled = true;
-    saveBtn.disabled = true;
-    
-    window.appendToTerminal('Validating AI provider connection...');
-    
-    const response = await fetch('/test-connection', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        provider: currentSettings.provider,
-        model: currentSettings.model,
-        apiKey: currentSettings.apiKey
-      })
-    });
-    
-    testBtn.disabled = false;
-    saveBtn.disabled = false;
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      showNotification(`Invalid AI settings: ${errorText}`, 'error');
-      showSection('settingsSection');
-      return false;
-    }
-    
-    return true;
-  } catch (error) {
-    showNotification(`Error validating settings: ${error.message}`, 'error');
-    showSection('settingsSection');
-    return false;
-  }
 }
 
 // Function to handle file upload
@@ -467,38 +516,6 @@ function updateModelOptions() {
     });
 }
 
-async function loadSettings() {
-    try {
-        const response = await fetch('/settings');
-        if (!response.ok) {
-            throw new Error('Failed to load settings');
-        }
-        
-        const settings = await response.json();
-        currentSettings = {
-            provider: settings.provider || 'anthropic',
-            model: settings.model || MODEL_OPTIONS.anthropic[0].id,
-            apiKey: settings.apiKey || ''
-        };
-        
-        document.getElementById('provider').value = currentSettings.provider;
-        document.getElementById('apiKey').value = currentSettings.apiKey;
-        updateModelOptions();
-        document.getElementById('model').value = currentSettings.model;
-    } catch (error) {
-        console.error('Error loading settings:', error);
-        // Fall back to defaults
-        currentSettings = {
-            provider: 'anthropic',
-            model: MODEL_OPTIONS.anthropic[0].id,
-            apiKey: ''
-        };
-        
-        document.getElementById('provider').value = currentSettings.provider;
-        updateModelOptions();
-    }
-}
-
 // Update the saveSettings function to properly collect the current API key
 async function saveSettings() {
   try {
@@ -685,72 +702,81 @@ let isChatOpen = false;
 
 // Function to send a chat message
 async function sendChatMessage() {
-  const messageInput = document.getElementById('chatInput');
-  const message = messageInput.value.trim();
-  
-  if (!message) return;
-  
-  // Clear input
-  messageInput.value = '';
-  
-  // Add user message to chat
-  addMessageToChat('user', message);
-  
-  // Show loading indicator
-  const loadingIndicator = document.createElement('div');
-  loadingIndicator.className = 'loading-indicator';
-  loadingIndicator.innerHTML = 'AI is thinking<span></span><span></span><span></span>';
-  document.getElementById('chatMessages').appendChild(loadingIndicator);
-  
-  try {
-    console.log("Sending chat message:", message);
-    console.log("Chat history:", chatHistory);
+    const messageInput = document.getElementById('chatInput');
+    const message = messageInput.value.trim();
     
-    // Get terminal output for context
-    const terminalOutput = document.getElementById('terminal').innerText;
+    if (!message) return;
     
-    // Prepare request
-    const chatRequest = {
-      message: message,
-      history: chatHistory,
-      terminalOutput: terminalOutput
-    };
-    
-    // Send request to server
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(chatRequest)
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || `HTTP error ${response.status}`);
+    // Validate settings first
+    const valid = await validateSettings();
+    if (!valid) {
+        showNotification('Please configure your API key in settings first', 'error');
+        toggleChat(); // Close chat panel
+        showSection('settingsSection'); // Show settings section
+        return;
     }
     
-    // Parse response
-    const data = await response.json();
+    // Clear input
+    messageInput.value = '';
     
-    // Remove loading indicator
-    document.querySelector('.loading-indicator').remove();
+    // Add user message to chat
+    addMessageToChat('user', message);
     
-    // Add assistant message to chat
-    addMessageToChat('assistant', data.response);
+    // Show loading indicator
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.className = 'loading-indicator';
+    loadingIndicator.innerHTML = 'AI is thinking<span></span><span></span><span></span>';
+    document.getElementById('chatMessages').appendChild(loadingIndicator);
     
-  } catch (error) {
-    console.error("Error sending chat message:", error);
-    
-    // Remove loading indicator
-    const loadingIndicator = document.querySelector('.loading-indicator');
-    if (loadingIndicator) {
-      loadingIndicator.remove();
+    try {
+        console.log("Sending chat message:", message);
+        console.log("Using settings:", currentSettings);
+        
+        // Get terminal output for context
+        const terminalOutput = document.getElementById('terminal').innerText;
+        
+        // Prepare request
+        const chatRequest = {
+            message: message,
+            history: chatHistory,
+            terminalOutput: terminalOutput
+        };
+        
+        // Send request to server
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(chatRequest)
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || `HTTP error ${response.status}`);
+        }
+        
+        // Parse response
+        const data = await response.json();
+        
+        // Remove loading indicator
+        document.querySelector('.loading-indicator').remove();
+        
+        // Add assistant message to chat
+        addMessageToChat('assistant', data.response);
+        
+    } catch (error) {
+        console.error("Error sending chat message:", error);
+        
+        // Remove loading indicator
+        const loadingIndicator = document.querySelector('.loading-indicator');
+        if (loadingIndicator) {
+            loadingIndicator.remove();
+        }
+        
+        // Add error message to chat
+        addMessageToChat('assistant', `Error: ${error.message}. Please check your API settings and try again.`);
     }
-    
-    // Add error message to chat
-    addMessageToChat('assistant', `Error: ${error.message}. Please check your API settings and try again.`);
-  }
 }
 
 // Function to add a message to the chat
@@ -888,11 +914,13 @@ document.addEventListener('DOMContentLoaded', function() {
   setupEventListeners();
   setupChatEventListeners();
   
-  // Validate settings on page load
-  validateSettings().then(valid => {
+  // Load settings
+  loadSettings().then(valid => {
     if (!valid) {
-      showNotification('Please configure your AI provider settings first', 'error');
-      showSection('settingsSection');
+      console.log("No valid API key found, showing notification");
+      showNotification('Please configure your AI provider settings first', 'warning');
+    } else {
+      console.log("Valid API key found");
     }
   });
 });
@@ -951,4 +979,44 @@ function setupDragAndDrop() {
     function handleFileInputChange() {
         // The upload button will be clicked manually
     }
+}
+
+// Add resize functionality to chat panel
+function setupChatResize() {
+  const chatPanel = document.getElementById('chatPanel');
+  let isResizing = false;
+  let startX;
+  let startWidth;
+
+  // Handle mouse down on the resize handle
+  chatPanel.addEventListener('mousedown', (e) => {
+    // Only trigger on the left 4px of the panel
+    if (e.clientX > chatPanel.getBoundingClientRect().left + 4) return;
+
+    isResizing = true;
+    startX = e.clientX;
+    startWidth = parseInt(getComputedStyle(chatPanel).width, 10);
+    
+    chatPanel.classList.add('resizing');
+  });
+
+  // Handle mouse move for resizing
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+
+    const width = startWidth - (e.clientX - startX);
+    
+    // Limit minimum and maximum width
+    if (width >= 300 && width <= window.innerWidth - 100) {
+      chatPanel.style.width = `${width}px`;
+    }
+  });
+
+  // Handle mouse up to stop resizing
+  document.addEventListener('mouseup', () => {
+    if (!isResizing) return;
+    
+    isResizing = false;
+    chatPanel.classList.remove('resizing');
+  });
 }

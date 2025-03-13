@@ -72,7 +72,7 @@ func main() {
 	http.HandleFunc("/ws", server.wsHandler)
 	http.HandleFunc("/test-connection", server.testConnectionHandler)
 	http.HandleFunc("/api/settings", server.settingsHandler)
-	http.HandleFunc("/api/chat", server.handleChatRequest)
+	http.HandleFunc("/api/chat", server.HandleChat)
 	http.HandleFunc("/save-settings", server.handleSaveSettings)
 	http.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -439,112 +439,14 @@ func testOpenRouterConnection(apiKey, model string) error {
 	return nil
 }
 
+// settingsHandler handles requests for settings
 func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		// Return current settings
-		settings := s.settingsManager.GetSettings()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(settings)
-
-	case http.MethodPost:
-		// Update settings
-		var settings Settings
-		if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-
-		// Update settings
-		s.settingsManager.UpdateSettings(settings)
-
-		// Save settings to file
-		if err := s.settingsManager.Save(); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to save settings: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Settings updated successfully"))
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-// handleChatRequest processes chat requests
-func (s *Server) handleChatRequest(w http.ResponseWriter, r *http.Request) {
-	// Parse request
-	var chatReq struct {
-		Message string `json:"message"`
-		History []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"history"`
-		TerminalOutput string `json:"terminalOutput"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&chatReq); err != nil {
-		log.Printf("Error parsing chat request: %v", err)
-		http.Error(w, "Invalid request format: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
 	// Get settings
 	settings := s.settingsManager.GetSettings()
 
-	// Check if API key is configured
-	if settings.APIKey == "" {
-		http.Error(w, "API key not configured. Please set up your AI provider settings.", http.StatusBadRequest)
-		return
-	}
-
-	// Convert to the format expected by the chat processor
-	processReq := ChatRequest{
-		Message: chatReq.Message,
-		History: []ChatMessage{},
-	}
-
-	// Add history
-	for _, msg := range chatReq.History {
-		processReq.History = append(processReq.History, ChatMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-
-	// Include terminal output if available
-	if chatReq.TerminalOutput != "" && !strings.Contains(chatReq.Message, "terminal output") {
-		processReq.Message = fmt.Sprintf("Terminal output:\n```\n%s\n```\n\nUser question: %s",
-			chatReq.TerminalOutput, chatReq.Message)
-	}
-
-	// Process the chat request using the existing function in chat.go
-	var response string
-	var err error
-
-	// Call the appropriate API based on the provider
-	switch settings.Provider {
-	case "anthropic":
-		response, err = s.callAnthropicAPI(processReq, settings)
-	case "openai":
-		response, err = s.callOpenAIAPI(processReq, settings)
-	case "openrouter":
-		response, err = s.callOpenRouterAPI(processReq, settings)
-	default:
-		http.Error(w, "Unsupported provider", http.StatusBadRequest)
-		return
-	}
-
-	if err != nil {
-		log.Printf("Error calling LLM API: %v", err)
-		http.Error(w, fmt.Sprintf("Error calling LLM API: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Return response
+	// Return settings as JSON
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"response": response})
+	json.NewEncoder(w).Encode(settings)
 }
 
 // handleSaveSettings handles the request to save settings
@@ -557,7 +459,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save the settings
+	// Save the settings using the settings manager
 	if err := s.settingsManager.SaveSettings(settings); err != nil {
 		log.Printf("Error saving settings: %v", err)
 		http.Error(w, "Failed to save settings: "+err.Error(), http.StatusInternalServerError)

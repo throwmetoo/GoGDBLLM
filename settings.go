@@ -59,12 +59,27 @@ func (sm *SettingsManager) Load() error {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 
+	// Try to read from the file path
 	data, err := os.ReadFile(sm.filePath)
 	if err != nil {
+		// If file doesn't exist, use default settings
+		if os.IsNotExist(err) {
+			sm.settings = Settings{
+				Provider: "anthropic",
+				Model:    "claude-3-sonnet-20240229",
+				APIKey:   "",
+			}
+			return nil
+		}
 		return err
 	}
 
-	return json.Unmarshal(data, &sm.settings)
+	// Unmarshal the data
+	if err := json.Unmarshal(data, &sm.settings); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Save settings to file
@@ -114,8 +129,14 @@ func (sm *SettingsManager) SaveSettings(settings Settings) error {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
-	// Write the settings to the file in the current directory
-	if err := os.WriteFile(settingsFile, data, 0600); err != nil {
+	// Write the settings to the file in the home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	settingsPath := filepath.Join(homeDir, settingsFile)
+	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
