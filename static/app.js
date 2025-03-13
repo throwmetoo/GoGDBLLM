@@ -79,6 +79,41 @@ document.addEventListener("DOMContentLoaded", () => {
   // Set up event listeners
   setupEventListeners();
   setupChatPanel();
+
+  // Add this to your existing initialization code
+  const commandInput = document.getElementById('commandInput');
+  
+  // Prevent password manager detection
+  commandInput.setAttribute('type', 'text');
+  commandInput.setAttribute('autocomplete', 'off');
+  
+  // Force type="text" if it gets changed
+  const observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(mutation) {
+          if (mutation.type === "attributes" && mutation.attributeName === "type") {
+              commandInput.setAttribute('type', 'text');
+          }
+      });
+  });
+  
+  observer.observe(commandInput, {
+      attributes: true
+  });
+  
+  // Prevent password manager popup on focus
+  commandInput.addEventListener('focus', function(e) {
+      setTimeout(() => {
+          if (commandInput.type !== 'text') {
+              commandInput.setAttribute('type', 'text');
+          }
+      }, 100);
+  });
+
+  // Make sure execute button is properly set up
+  setupExecuteButton();
+
+  // Set up auto-execute checkbox to toggle execute button visibility
+  setupAutoExecuteCheckbox();
 });
 
 // Set up all event listeners
@@ -95,7 +130,7 @@ function setupEventListeners() {
   });
 
   // Command input
-  commandInput.addEventListener("keydown", handleCommandInput);
+  commandInput.addEventListener("keydown", handleCommand);
 
   // Upload button
   if (uploadBtn) {
@@ -304,63 +339,75 @@ async function validateSettings() {
 }
 
 // Function to handle file upload
-async function handleFileUpload() {
-  // Check if a file is selected
-  if (!fileInput.files.length) {
-    showNotification('Please select a file first', 'error');
-    return;
-  }
-
-  const file = fileInput.files[0];
-  const formData = new FormData();
-  formData.append('file', file);
-
-  // Show loading state
-  uploadBtn.disabled = true;
-  uploadBtn.textContent = 'Uploading...';
-  
-  try {
-    console.log("Uploading file:", file.name);
-    const response = await fetch('/upload', {
-      method: 'POST',
-      body: formData
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || `HTTP error ${response.status}`);
+function handleFileUpload() {
+    // Get the file from the input
+    const file = fileInput.files[0];
+    if (!file) {
+        showNotification('Please select a file first', 'error');
+        return;
     }
 
-    // Get the response text
-    const responseText = await response.text();
-    
-    // Update UI
-    uploadedFileName = file.name;
-    uploadBtn.textContent = `Uploaded: ${file.name}`;
-    executeBtn.disabled = false;
-    
-    // Show success message
-    showNotification('File uploaded successfully', 'success');
-    appendToTerminal(responseText);
-    
-    // Auto-execute if checkbox is checked
-    if (document.getElementById('autoExecute').checked) {
-      executeUploadedFile();
-    }
-  } catch (error) {
-    console.error("Error uploading file:", error);
-    showNotification(`Upload failed: ${error.message}`, 'error');
-    appendToTerminal(`Error: ${error.message}`);
-  } finally {
-    // Reset button state
-    uploadBtn.disabled = false;
-    uploadBtn.textContent = 'Upload';
-  }
+    const formData = new FormData();
+    formData.append("file", file);
+
+    // Update UI to show upload in progress
+    const uploadStatus = document.getElementById("uploadStatus");
+    const executeBtn = document.getElementById("executeBtn");
+    const filePath = document.getElementById("filePath");
+    uploadStatus.textContent = "Uploading...";
+    uploadStatus.style.color = "#ffcc00";
+
+    fetch("/upload", {
+        method: "POST",
+        body: formData,
+    })
+        .then(response => {
+            // First check if the response is ok
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            // Then try to parse the JSON
+            return response.json().catch(e => {
+                throw new Error('Failed to parse server response as JSON');
+            });
+        })
+        .then(data => {
+            if (data.success) {
+                uploadStatus.textContent = `File uploaded: ${data.filename}`;
+                uploadStatus.style.color = "#00cc00";
+                
+                // Store the uploaded file path and display it
+                uploadedFileName = data.filename;
+                currentFilePath = data.filepath;
+                filePath.textContent = data.filepath;
+                
+                // Auto-execute if checkbox is checked
+                const autoExecuteCheckbox = document.getElementById("autoExecute");
+                if (autoExecuteCheckbox && autoExecuteCheckbox.checked) {
+                    executeUploadedFile();
+                    executeBtn.style.display = "none";
+                } else {
+                    executeBtn.style.display = "block";
+                }
+            } else {
+                uploadStatus.textContent = `Upload failed: ${data.error}`;
+                uploadStatus.style.color = "#ff0000";
+                filePath.textContent = "";
+                executeBtn.style.display = "none";
+            }
+        })
+        .catch(error => {
+            uploadStatus.textContent = `Upload error: ${error.message}`;
+            uploadStatus.style.color = "#ff0000";
+            filePath.textContent = "";
+            executeBtn.style.display = "none";
+            console.error('Upload error:', error);
+        });
 }
 
 // Function to execute the uploaded file
 function executeUploadedFile() {
-  if (!uploadedFileName) {
+  if (!currentFilePath) {
     showNotification('Please upload a file first', 'error');
     return;
   }
@@ -368,9 +415,28 @@ function executeUploadedFile() {
   // Show terminal section
   showSection('terminalSection');
   
-  // Execute the file in GDB
-  appendToTerminal(`Executing ${uploadedFileName} in GDB...`);
-  sendCommand(`/tmp/${uploadedFileName}`);
+  // First ensure GDB is started
+  fetch("/start-gdb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ filepath: currentFilePath })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      appendToTerminal(`GDB started successfully. Loading ${uploadedFileName}...`);
+      // Use the correct path from the server response
+      sendCommand(`file ${currentFilePath}`);
+    } else {
+      appendToTerminal(`Error starting GDB: ${data.error}`);
+    }
+  })
+  .catch(error => {
+    appendToTerminal(`Error starting GDB: ${error.message}`);
+    console.error('GDB start error:', error);
+  });
 }
 
 // Make sure the upload button is not disabled by default
@@ -382,124 +448,65 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
-// Handle command input from the terminal
-function handleCommandInput(event) {
-  if (event.ctrlKey) {
-      switch (event.key.toLowerCase()) {
-        case 'c':
-          event.preventDefault();
-          sendSpecialCommand('CTRL_C');
-          window.appendToTerminal('^C');
-          return;
-        case 'd':
-          event.preventDefault();
-          sendSpecialCommand('CTRL_D');
-          window.appendToTerminal('^D');
-          return;
-        case 'z':
-          event.preventDefault();
-          sendSpecialCommand('CTRL_Z');
-          window.appendToTerminal('^Z');
-          return;
-      }
-    }
-  
-  // Handle arrow keys
-  if (event.key === 'ArrowUp') {
-    event.preventDefault();
-    sendSpecialCommand('ARROW_UP');
-    return;
-  }
-  if (event.key === 'ArrowDown') {
-    event.preventDefault();
-    sendSpecialCommand('ARROW_DOWN');
-    return;
-  }
-  
-  if (event.key === "Enter") {
+// Handle command input
+function handleCommand(event) {
+    const commandInput = document.getElementById('commandInput');
     const command = commandInput.value.trim();
-    if (command) {
-      if (!terminalConnected) {
-        window.appendToTerminal("Connecting to server...");
-        connectWebSocket(() => {
-          sendCommand(command);
-        });
-      } else {
+    
+    if (event.key === 'Enter' && !event.shiftKey && command) {
+        event.preventDefault();
         sendCommand(command);
-      }
-      commandInput.value = "";
+        
+        // Clear input with a slight delay to ensure it happens after processing
+        setTimeout(() => {
+            commandInput.value = '';
+            // Force input field refresh
+            commandInput.focus();
+        }, 10);
     }
-  }
 }
 
-// Function to send special commands
-function sendSpecialCommand(commandType) {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    // Send a JSON object to differentiate special commands
-    socket.send(JSON.stringify({
-      type: 'special',
-      command: commandType
-    }));
-  } else {
-    window.appendToTerminal("Error: Not connected to server. Trying to reconnect...");
-    connectWebSocket();
-  }
-}
-
-// Update the regular sendCommand function to identify regular commands
 function sendCommand(command) {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    // Send a JSON object for regular commands too
-    socket.send(JSON.stringify({
-      type: 'regular',
-      command: command
-    }));
-    window.appendToTerminal(`> ${command}`);
-  } else {
-    window.appendToTerminal("Error: Not connected to server. Trying to reconnect...");
-    connectWebSocket(() => {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-          type: 'regular',
-          command: command
-        }));
-        window.appendToTerminal(`> ${command}`);
-      }
-    });
-  }
+    if (!window.socket || window.socket.readyState !== WebSocket.OPEN) {
+        appendToTerminal("Error: Not connected to server. Trying to reconnect...");
+        connectWebSocket();
+        // Queue the command to be sent after connection
+        setTimeout(() => sendCommand(command), 1000);
+        return;
+    }
+    
+    appendToTerminal(`> ${command}`);
+    window.socket.send(command);
 }
 
 // Connect to WebSocket server
-function connectWebSocket(callback) {
-  // Close existing socket if any
-  if (socket) {
-    socket.close();
-  }
-
-  socket = new WebSocket("ws://localhost:8080/ws");
-
-  socket.onopen = function () {
+function connectWebSocket() {
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+  
+  appendToTerminal("Connecting to server...");
+  
+  const socket = new WebSocket(wsUrl);
+  
+  socket.onopen = function() {
     terminalConnected = true;
-    window.appendToTerminal("Connected to server.");
-
-    if (callback && typeof callback === "function") {
-      callback();
-    }
+    appendToTerminal("Connected to server.");
   };
-
-  socket.onmessage = function (event) {
-    window.appendToTerminal(event.data);
+  
+  socket.onmessage = function(event) {
+    appendToTerminal(event.data);
   };
-
-  socket.onerror = function () {
-    window.appendToTerminal("WebSocket error occurred.");
+  
+  socket.onclose = function() {
     terminalConnected = false;
+    appendToTerminal("Disconnected from server.");
   };
-
-  socket.onclose = function () {
-    window.appendToTerminal("Disconnected from server.");
-    terminalConnected = false;
+  
+  socket.onerror = function() {
+    appendToTerminal("WebSocket error occurred.");
   };
+  
+  window.socket = socket;
 }
 
 // Add these new functions
@@ -1019,4 +1026,32 @@ function setupChatResize() {
     isResizing = false;
     chatPanel.classList.remove('resizing');
   });
+}
+
+// Make sure execute button is properly set up
+function setupExecuteButton() {
+  const executeBtn = document.getElementById("executeBtn");
+  if (executeBtn) {
+    executeBtn.addEventListener("click", executeUploadedFile);
+    
+    // Set initial visibility based on auto-execute checkbox
+    const autoExecuteCheckbox = document.getElementById("autoExecute");
+    if (autoExecuteCheckbox) {
+      executeBtn.style.display = autoExecuteCheckbox.checked ? "none" : "block";
+    } else {
+      executeBtn.style.display = "block";
+    }
+  }
+}
+
+// Set up auto-execute checkbox to toggle execute button visibility
+function setupAutoExecuteCheckbox() {
+  const autoExecuteCheckbox = document.getElementById("autoExecute");
+  const executeBtn = document.getElementById("executeBtn");
+  
+  if (autoExecuteCheckbox && executeBtn) {
+    autoExecuteCheckbox.addEventListener("change", function() {
+      executeBtn.style.display = this.checked ? "none" : "block";
+    });
+  }
 }

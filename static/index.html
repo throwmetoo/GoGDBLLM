@@ -219,6 +219,53 @@
                     opacity: 0;
                 }
             }
+
+            .file-status {
+                margin: 15px 0;
+                padding: 10px;
+                border-radius: 4px;
+                background-color: #2a2a2a;
+                width: 100%;
+                max-width: 500px;
+            }
+
+            .file-path {
+                margin-top: 5px;
+                font-family: monospace;
+                word-break: break-all;
+                color: #00cc00;
+            }
+
+            .execution-controls {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+                margin-top: 15px;
+                width: 100%;
+                max-width: 500px;
+            }
+
+            .execute-btn {
+                background-color: #00cc00;
+                color: black;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 4px;
+                cursor: pointer;
+                width: 100%;
+                max-width: 200px;
+                font-weight: bold;
+            }
+
+            .execute-btn:hover {
+                background-color: #00ff00;
+            }
+
+            .execute-btn:disabled {
+                background-color: #666;
+                cursor: not-allowed;
+            }
         </style>
     </head>
     <body>
@@ -240,20 +287,39 @@
                 
                 <div class="upload-controls">
                     <button id="uploadBtn" class="btn">Upload Selected File</button>
-                    <div id="uploadStatus"></div>
-                    <div class="auto-execute">
-                        <input type="checkbox" id="autoExecute">
-                        <label for="autoExecute">Auto-execute after upload</label>
+                    <div class="file-status">
+                        <div id="uploadStatus"></div>
+                        <div id="filePath" class="file-path"></div>
+                    </div>
+                    <div class="execution-controls">
+                        <div class="auto-execute">
+                            <input type="checkbox" id="autoExecute">
+                            <label for="autoExecute">Auto-execute after upload</label>
+                        </div>
+                        <button id="executeBtn" class="execute-btn">Execute File</button>
                     </div>
                 </div>
             </div>
         </div>
-
+        
         <div id="terminalSection">
             <div id="terminal" tabindex="0"></div>
             <div id="commandWrapper">
                 <span id="commandPrompt">&gt;</span>
-                <input type="text" id="commandInput" autofocus />
+                <input type="text" 
+                       id="commandInput" 
+                       autocomplete="off"
+                       autocorrect="off"
+                       autocapitalize="none"
+                       data-form-type="other"
+                       data-lpignore="true"
+                       data-1p-ignore="true"
+                       data-webauthn="false"
+                       data-autofill="false"
+                       name="terminal-command-input"
+                       aria-label="Terminal command input"
+                       class="terminal-input"
+                       spellcheck="false">
             </div>
             <button id="executeBtn">Execute File</button>
         </div>

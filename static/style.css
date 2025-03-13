@@ -49,7 +49,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    max-height: calc(100vh - 140px); /* Adjust based on header and input heights */
+    height: calc(100vh - 180px); /* Account for header, footer, and input */
 }
 
 .user-message, .assistant-message, .system-message {
@@ -58,7 +58,7 @@
     max-width: 85%;
     word-wrap: break-word;
     white-space: pre-wrap;
-    overflow-x: auto;
+    overflow-wrap: break-word;
 }
 
 .user-message {
@@ -91,6 +91,8 @@
     display: flex;
     position: sticky;
     bottom: 0;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .chat-input-container textarea {
@@ -120,9 +122,13 @@
 }
 
 .chat-footer {
-    padding: 10px 15px;
+    position: sticky;
+    bottom: 0;
+    width: 100%;
     background-color: #333;
     border-top: 1px solid #444;
+    padding: 10px 15px;
+    box-sizing: border-box;
     font-size: 0.8em;
     color: #aaa;
 }
@@ -179,13 +185,13 @@
 .assistant-message pre,
 .user-message pre {
     max-width: 100%;
-    overflow-x: auto;
     white-space: pre-wrap;
     word-wrap: break-word;
     background-color: #222;
     padding: 10px;
     border-radius: 4px;
     margin: 5px 0;
+    overflow-x: visible;
 }
 
 /* Handle inline code */
@@ -338,4 +344,17 @@
 /* Remove transition when resizing */
 .chat-panel.resizing {
     transition: none;
+}
+
+#commandInput::-webkit-credentials-auto-fill-button,
+#commandInput:-webkit-autofill,
+#commandInput:-webkit-autofill:hover,
+#commandInput:-webkit-autofill:focus {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: black !important;
+    color: lime !important;
+    -webkit-text-fill-color: lime !important;
+    -webkit-box-shadow: 0 0 0px 1000px black inset;
+    transition: background-color 5000s ease-in-out 0s;
 }

@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"path"
 	"strings"
 	"sync"
 	"syscall"
@@ -46,6 +46,11 @@ type Server struct {
 	settingsManager *SettingsManager
 	terminalBuffer  bytes.Buffer
 	bufferMutex     sync.Mutex
+	gdbCmd          *exec.Cmd
+	gdbStdin        io.WriteCloser
+	gdbStdout       io.ReadCloser
+	clients         map[chan string]bool
+	clientsMutex    sync.Mutex
 }
 
 func main() {
@@ -59,6 +64,7 @@ func main() {
 	// Create server instance
 	server := &Server{
 		settingsManager: settingsManager,
+		clients:         make(map[chan string]bool),
 	}
 
 	content, err := fs.Sub(staticFiles, "static")
@@ -68,7 +74,7 @@ func main() {
 
 	fileServer := http.FileServer(http.FS(content))
 	http.Handle("/", fileServer)
-	http.HandleFunc("/upload", server.uploadHandler)
+	http.HandleFunc("/upload", server.handleUpload)
 	http.HandleFunc("/ws", server.wsHandler)
 	http.HandleFunc("/test-connection", server.testConnectionHandler)
 	http.HandleFunc("/api/settings", server.settingsHandler)
@@ -78,52 +84,82 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Server is working"))
 	})
+	http.HandleFunc("/start-gdb", server.handleStartGDB)
 
 	fmt.Println("Serving on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func (s *Server) uploadHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	// Set JSON content type header
+	w.Header().Set("Content-Type", "application/json")
 
-	err := r.ParseMultipartForm(10 << 20)
+	// Parse the multipart form
+	err := r.ParseMultipartForm(10 << 20) // 10 MB max
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Parse form error: %v", err), http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse form: " + err.Error(),
+		})
 		return
 	}
 
+	// Get the file from form data
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "Unable to retrieve file from form", http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to get file: " + err.Error(),
+		})
 		return
 	}
 	defer file.Close()
 
-	tmpDir := os.TempDir()
-	tmpFilePath := filepath.Join(tmpDir, header.Filename)
-	outFile, err := os.Create(tmpFilePath)
-	if err != nil {
-		http.Error(w, "Unable to create file on the server", http.StatusInternalServerError)
-		return
-	}
-	defer outFile.Close()
-
-	_, err = io.Copy(outFile, file)
-	if err != nil {
-		http.Error(w, "Error saving file", http.StatusInternalServerError)
+	// Create uploads directory if it doesn't exist
+	if err := os.MkdirAll("uploads", 0755); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to create uploads directory: " + err.Error(),
+		})
 		return
 	}
 
-	err = os.Chmod(tmpFilePath, 0755)
+	// Create the file
+	filepath := path.Join("uploads", header.Filename)
+	dst, err := os.Create(filepath)
 	if err != nil {
-		http.Error(w, "Unable to set file permissions", http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to create file: " + err.Error(),
+		})
+		return
+	}
+	defer dst.Close()
+
+	// Copy the uploaded file
+	if _, err := io.Copy(dst, file); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to save file: " + err.Error(),
+		})
 		return
 	}
 
-	fmt.Fprintln(w, "File uploaded and ready for execution")
+	// Make the file executable
+	if err := os.Chmod(filepath, 0755); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to make file executable: " + err.Error(),
+		})
+		return
+	}
+
+	// Return success response
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"filename": header.Filename,
+		"filepath": filepath,
+	})
 }
 
 func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -134,21 +170,29 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// Create a channel for this client
+	messageChan := make(chan string, 100)
+	s.clientsMutex.Lock()
+	s.clients[messageChan] = true
+	s.clientsMutex.Unlock()
+	defer func() {
+		s.clientsMutex.Lock()
+		delete(s.clients, messageChan)
+		s.clientsMutex.Unlock()
+	}()
+
 	// Create a command processor to manage the interactive session
-	var cmd *exec.Cmd
-	var stdin io.WriteCloser
 	var isGDBRunning bool
 
-	cleanup := func() {
-		if stdin != nil {
-			stdin.Close()
+	// Start a goroutine to send messages to the WebSocket
+	go func() {
+		for msg := range messageChan {
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+				log.Printf("Write error: %v", err)
+				return
+			}
 		}
-		if cmd != nil && cmd.Process != nil {
-			cmd.Process.Kill()
-		}
-		isGDBRunning = false
-	}
-	defer cleanup()
+	}()
 
 	for {
 		_, rawMsg, err := conn.ReadMessage()
@@ -157,159 +201,25 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		var msg WebSocketMessage
-		if err := json.Unmarshal(rawMsg, &msg); err != nil {
-			command := string(rawMsg)
-			if strings.HasPrefix(command, "/tmp/") {
-				s.startGDBSession(command, conn, &cmd, &stdin, &isGDBRunning)
-			} else if isGDBRunning {
-				s.sendCommandToGDB(command, conn, stdin)
-			} else {
+		command := string(rawMsg)
+		if strings.HasPrefix(command, "file ") {
+			if s.gdbCmd == nil || s.gdbStdin == nil {
 				conn.WriteMessage(websocket.TextMessage, []byte("Error: GDB is not running. Please upload and execute a file first"))
+				continue
 			}
-			continue
+			isGDBRunning = true
 		}
 
-		switch msg.Type {
-		case "special":
-			s.handleSpecialCommand(msg.Command, conn, cmd, stdin, &isGDBRunning)
-		case "regular":
-			if strings.HasPrefix(msg.Command, "/tmp/") {
-				s.startGDBSession(msg.Command, conn, &cmd, &stdin, &isGDBRunning)
-			} else if isGDBRunning {
-				s.sendCommandToGDB(msg.Command, conn, stdin)
-			} else {
-				conn.WriteMessage(websocket.TextMessage, []byte("Error: GDB is not running. Please upload and execute a file first."))
-			}
-		default:
-			conn.WriteMessage(websocket.TextMessage, []byte("Unknown message type"))
-		}
-	}
-}
-
-// Function to handle special commands like CTRL+C
-func (s *Server) handleSpecialCommand(commandType string, conn *websocket.Conn, cmd *exec.Cmd, stdin io.WriteCloser, isGDBRunning *bool) {
-	if !*isGDBRunning || cmd == nil || cmd.Process == nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("No running GDB process to control"))
-		return
-	}
-
-	switch commandType {
-	case "CTRL_C":
-		// Send SIGINT to the process group
-		pgid, err := syscall.Getpgid(cmd.Process.Pid)
-		if err != nil {
-			log.Printf("Error getting process group: %v", err)
-			conn.WriteMessage(websocket.TextMessage, []byte("Error interrupting process"))
-			return
-		}
-		if err := syscall.Kill(-pgid, syscall.SIGINT); err != nil {
-			log.Printf("Error sending SIGINT: %v", err)
-			conn.WriteMessage(websocket.TextMessage, []byte("Error interrupting process"))
-		}
-	case "CTRL_Z":
-		// Send SIGTSTP to the process group
-		pgid, err := syscall.Getpgid(cmd.Process.Pid)
-		if err != nil {
-			log.Printf("Error getting process group: %v", err)
-			return
-		}
-		if err := syscall.Kill(-pgid, syscall.SIGTSTP); err != nil {
-			log.Printf("Error sending SIGTSTP: %v", err)
-		}
-	case "CTRL_D":
-		// Send EOF to the process
-		conn.WriteMessage(websocket.TextMessage, []byte("Sending EOF to GDB"))
-		// Implementation depends on your specific requirements
-	case "ARROW_UP":
-		// These would typically access command history
-		// For GDB, we'd send the appropriate escape sequence
-		s.sendCommandToGDB("\x1b[A", conn, stdin)
-	case "ARROW_DOWN":
-		s.sendCommandToGDB("\x1b[B", conn, stdin)
-	default:
-		conn.WriteMessage(websocket.TextMessage, []byte("Unknown special command: "+commandType))
-	}
-}
-
-// Function to start a new GDB session
-func (s *Server) startGDBSession(filePath string, conn *websocket.Conn, cmdPtr **exec.Cmd, stdinPtr *io.WriteCloser, isGDBRunning *bool) {
-	// Clean up any existing process
-	if *isGDBRunning && *cmdPtr != nil && (*cmdPtr).Process != nil {
-		(*cmdPtr).Process.Kill()
-		*isGDBRunning = false
-	}
-
-	// Create a new command that will have its own process group
-	cmd := exec.Command("gdb", filePath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Set process group ID for proper signal handling
-	}
-
-	// Get stdin pipe
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		log.Printf("Error getting stdin pipe: %v", err)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
-		return
-	}
-
-	// Get stdout and stderr pipes
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		log.Printf("Error getting stdout pipe: %v", err)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
-		return
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		log.Printf("Error getting stderr pipe: %v", err)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
-		return
-	}
-
-	// Start command
-	if err := cmd.Start(); err != nil {
-		log.Printf("Error starting GDB: %v", err)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to start GDB: %v", err)))
-		return
-	}
-
-	*cmdPtr = cmd
-	*stdinPtr = stdin
-	*isGDBRunning = true
-
-	// Read output in a goroutine
-	go func() {
-		scanner := bufio.NewScanner(io.MultiReader(stdout, stderr))
-		for scanner.Scan() {
-			text := scanner.Text()
-			err := conn.WriteMessage(websocket.TextMessage, []byte(text))
+		if isGDBRunning {
+			// Send command to GDB's stdin
+			_, err := fmt.Fprintln(s.gdbStdin, command)
 			if err != nil {
-				log.Printf("Error writing to WebSocket: %v", err)
-				return
+				log.Printf("Error writing to GDB stdin: %v", err)
+				conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
 			}
-		}
-
-		// Check if GDB exited
-		if err := cmd.Wait(); err != nil {
-			log.Printf("GDB exited with error: %v", err)
 		} else {
-			log.Println("GDB exited normally")
+			conn.WriteMessage(websocket.TextMessage, []byte("Error: GDB is not running. Please upload and execute a file first"))
 		}
-
-		*isGDBRunning = false
-	}()
-}
-
-// Function to send a command to GDB
-func (s *Server) sendCommandToGDB(command string, conn *websocket.Conn, stdin io.WriteCloser) {
-	// Send command to GDB's stdin
-	_, err := fmt.Fprintln(stdin, command)
-	if err != nil {
-		log.Printf("Error writing to GDB stdin: %v", err)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
 	}
 }
 
@@ -469,4 +379,130 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	// Return success
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Settings saved successfully"))
+}
+
+func (s *Server) handleStartGDB(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse the request body
+	var req struct {
+		Filepath string `json:"filepath"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse request: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate the filepath
+	if req.Filepath == "" {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "No filepath provided",
+		})
+		return
+	}
+
+	// Check if the file exists
+	if _, err := os.Stat(req.Filepath); os.IsNotExist(err) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "File does not exist: " + req.Filepath,
+		})
+		return
+	}
+
+	// Start GDB (you'll need to implement this based on your existing GDB handling code)
+	if err := s.startGDB(); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to start GDB: " + err.Error(),
+		})
+		return
+	}
+
+	// Return success
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+	})
+}
+
+func (s *Server) startGDB() error {
+	s.clientsMutex.Lock()
+	defer s.clientsMutex.Unlock()
+
+	// Kill any existing GDB process
+	if s.gdbCmd != nil && s.gdbCmd.Process != nil {
+		s.gdbCmd.Process.Kill()
+		s.gdbCmd.Wait() // Clean up the process
+	}
+
+	// Start a new GDB process
+	cmd := exec.Command("gdb", "-q")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true, // Set process group ID for proper signal handling
+	}
+
+	// Set up pipes for stdin/stdout
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start GDB: %w", err)
+	}
+
+	// Store the command and pipes
+	s.gdbCmd = cmd
+	s.gdbStdin = stdin
+	s.gdbStdout = stdout
+
+	// Start a goroutine to read from stdout and stderr
+	go func() {
+		scanner := bufio.NewScanner(io.MultiReader(stdout, stderr))
+		for scanner.Scan() {
+			text := scanner.Text()
+			s.broadcastToClients(text)
+		}
+	}()
+
+	return nil
+}
+
+func (s *Server) broadcastToClients(message string) {
+	s.clientsMutex.Lock()
+	defer s.clientsMutex.Unlock()
+
+	for client := range s.clients {
+		// Try to send, but don't block if it fails
+		select {
+		case client <- message:
+			// Message sent successfully
+		default:
+			// Client buffer is full or disconnected, remove it
+			close(client)
+			delete(s.clients, client)
+		}
+	}
+}
+
+func NewServer() *Server {
+	return &Server{
+		clients: make(map[chan string]bool),
+	}
 }
