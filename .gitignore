@@ -1,0 +1,40 @@
+# Go build artifacts
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test and coverage files
+*.test
+*.out
+coverage.txt
+
+# Go workspace files
+go.work
+
+# Dependency directories
+/vendor/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Application specific
+*.pem
+*.key
+
+# Uploaded files and temp directories
+/uploads/
+/tmp/
+
+# API keys and sensitive files
+**/file.txt
+**/*api*.txt
+**/*.env
+.env
+.env.local
