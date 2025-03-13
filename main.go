@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/gorilla/websocket"
@@ -39,14 +41,24 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-var settingsManager *SettingsManager
+// Server represents the HTTP server
+type Server struct {
+	settingsManager *SettingsManager
+	terminalBuffer  bytes.Buffer
+	bufferMutex     sync.Mutex
+}
 
 func main() {
 	// Initialize settings manager
 	var err error
-	settingsManager, err = NewSettingsManager("")
+	settingsManager, err := NewSettingsManager("")
 	if err != nil {
 		log.Fatalf("Failed to initialize settings manager: %v", err)
+	}
+
+	// Create server instance
+	server := &Server{
+		settingsManager: settingsManager,
 	}
 
 	content, err := fs.Sub(staticFiles, "static")
@@ -56,16 +68,22 @@ func main() {
 
 	fileServer := http.FileServer(http.FS(content))
 	http.Handle("/", fileServer)
-	http.HandleFunc("/upload", uploadHandler)
-	http.HandleFunc("/ws", wsHandler)
-	http.HandleFunc("/test-connection", testConnectionHandler)
-	http.HandleFunc("/settings", settingsHandler)
+	http.HandleFunc("/upload", server.uploadHandler)
+	http.HandleFunc("/ws", server.wsHandler)
+	http.HandleFunc("/test-connection", server.testConnectionHandler)
+	http.HandleFunc("/api/settings", server.settingsHandler)
+	http.HandleFunc("/api/chat", server.handleChatRequest)
+	http.HandleFunc("/save-settings", server.handleSaveSettings)
+	http.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Server is working"))
+	})
 
 	fmt.Println("Serving on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func uploadHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST method allowed", http.StatusMethodNotAllowed)
 		return
@@ -108,7 +126,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "File uploaded and ready for execution")
 }
 
-func wsHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print("Upgrade error:", err)
@@ -143,9 +161,9 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(rawMsg, &msg); err != nil {
 			command := string(rawMsg)
 			if strings.HasPrefix(command, "/tmp/") {
-				startGDBSession(command, conn, &cmd, &stdin, &isGDBRunning)
+				s.startGDBSession(command, conn, &cmd, &stdin, &isGDBRunning)
 			} else if isGDBRunning {
-				sendCommandToGDB(msg.Command, conn, stdin)
+				s.sendCommandToGDB(command, conn, stdin)
 			} else {
 				conn.WriteMessage(websocket.TextMessage, []byte("Error: GDB is not running. Please upload and execute a file first"))
 			}
@@ -154,23 +172,23 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 
 		switch msg.Type {
 		case "special":
-			handleSpecialCommand(msg.Command, conn, cmd, stdin, &isGDBRunning)
+			s.handleSpecialCommand(msg.Command, conn, cmd, stdin, &isGDBRunning)
 		case "regular":
 			if strings.HasPrefix(msg.Command, "/tmp/") {
-				startGDBSession(msg.Command, conn, &cmd, &stdin, &isGDBRunning)
+				s.startGDBSession(msg.Command, conn, &cmd, &stdin, &isGDBRunning)
 			} else if isGDBRunning {
-				sendCommandToGDB(msg.Command, conn, stdin)
+				s.sendCommandToGDB(msg.Command, conn, stdin)
 			} else {
 				conn.WriteMessage(websocket.TextMessage, []byte("Error: GDB is not running. Please upload and execute a file first."))
 			}
 		default:
-			conn.WriteMessage(websocket.TextMessage, []byte("Error: Unknown message type"))
+			conn.WriteMessage(websocket.TextMessage, []byte("Unknown message type"))
 		}
 	}
 }
 
 // Function to handle special commands like CTRL+C
-func handleSpecialCommand(commandType string, conn *websocket.Conn, cmd *exec.Cmd, stdin io.WriteCloser, isGDBRunning *bool) {
+func (s *Server) handleSpecialCommand(commandType string, conn *websocket.Conn, cmd *exec.Cmd, stdin io.WriteCloser, isGDBRunning *bool) {
 	if !*isGDBRunning || cmd == nil || cmd.Process == nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("No running GDB process to control"))
 		return
@@ -206,16 +224,16 @@ func handleSpecialCommand(commandType string, conn *websocket.Conn, cmd *exec.Cm
 	case "ARROW_UP":
 		// These would typically access command history
 		// For GDB, we'd send the appropriate escape sequence
-		sendCommandToGDB("\x1b[A", conn, stdin)
+		s.sendCommandToGDB("\x1b[A", conn, stdin)
 	case "ARROW_DOWN":
-		sendCommandToGDB("\x1b[B", conn, stdin)
+		s.sendCommandToGDB("\x1b[B", conn, stdin)
 	default:
 		conn.WriteMessage(websocket.TextMessage, []byte("Unknown special command: "+commandType))
 	}
 }
 
 // Function to start a new GDB session
-func startGDBSession(filePath string, conn *websocket.Conn, cmdPtr **exec.Cmd, stdinPtr *io.WriteCloser, isGDBRunning *bool) {
+func (s *Server) startGDBSession(filePath string, conn *websocket.Conn, cmdPtr **exec.Cmd, stdinPtr *io.WriteCloser, isGDBRunning *bool) {
 	// Clean up any existing process
 	if *isGDBRunning && *cmdPtr != nil && (*cmdPtr).Process != nil {
 		(*cmdPtr).Process.Kill()
@@ -286,7 +304,7 @@ func startGDBSession(filePath string, conn *websocket.Conn, cmdPtr **exec.Cmd, s
 }
 
 // Function to send a command to GDB
-func sendCommandToGDB(command string, conn *websocket.Conn, stdin io.WriteCloser) {
+func (s *Server) sendCommandToGDB(command string, conn *websocket.Conn, stdin io.WriteCloser) {
 	// Send command to GDB's stdin
 	_, err := fmt.Fprintln(stdin, command)
 	if err != nil {
@@ -295,7 +313,7 @@ func sendCommandToGDB(command string, conn *websocket.Conn, stdin io.WriteCloser
 	}
 }
 
-func testConnectionHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) testConnectionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -421,11 +439,11 @@ func testOpenRouterConnection(apiKey, model string) error {
 	return nil
 }
 
-func settingsHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		// Return current settings
-		settings := settingsManager.GetSettings()
+		settings := s.settingsManager.GetSettings()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(settings)
 
@@ -437,15 +455,97 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := settingsManager.UpdateSettings(settings); err != nil {
-			http.Error(w, "Failed to save settings", http.StatusInternalServerError)
+		// Update settings
+		s.settingsManager.UpdateSettings(settings)
+
+		// Save settings to file
+		if err := s.settingsManager.Save(); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save settings: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		w.Write([]byte("Settings updated successfully"))
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleChatRequest(w http.ResponseWriter, r *http.Request) {
+	// Parse request
+	var chatReq ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&chatReq); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Get terminal output if available
+	terminalOutput := s.getLatestTerminalOutput() // You'll need to implement this function
+
+	// If we have terminal output, include it in the message
+	if terminalOutput != "" && !strings.Contains(chatReq.Message, "terminal output:") {
+		chatReq.Message = fmt.Sprintf("Terminal output:\n```\n%s\n```\n\nUser question: %s",
+			terminalOutput, chatReq.Message)
+	}
+
+	// Process chat request
+	response, err := s.ProcessChatRequest(chatReq)
+	if err != nil {
+		http.Error(w, "Error processing chat: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"response": response})
+}
+
+// getLatestTerminalOutput retrieves the latest terminal output
+// This is a placeholder - you'll need to implement this based on how you're storing terminal output
+func (s *Server) getLatestTerminalOutput() string {
+	// This is where you would retrieve the latest terminal output
+	// For example, you might keep a buffer of recent terminal output
+	// or retrieve it from a session variable
+
+	// For now, return an empty string
+	return s.terminalBuffer.String() // Assuming you have a terminalBuffer field in your Server struct
+}
+
+// Add this to your terminal output handling code
+func (s *Server) appendToTerminalBuffer(data []byte) {
+	s.bufferMutex.Lock()
+	defer s.bufferMutex.Unlock()
+
+	// Limit buffer size to prevent memory issues (e.g., last 10KB)
+	if s.terminalBuffer.Len() > 10240 {
+		// Clear and keep only the last 5KB
+		buf := s.terminalBuffer.Bytes()
+		s.terminalBuffer.Reset()
+		s.terminalBuffer.Write(buf[len(buf)-5120:])
+	}
+
+	s.terminalBuffer.Write(data)
+}
+
+// handleSaveSettings handles the request to save settings
+func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
+	// Parse the settings from the request
+	var settings Settings
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+		log.Printf("Error parsing settings: %v", err)
+		http.Error(w, "Invalid settings format: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Save the settings
+	if err := s.settingsManager.SaveSettings(settings); err != nil {
+		log.Printf("Error saving settings: %v", err)
+		http.Error(w, "Failed to save settings: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Settings saved successfully"))
 }

@@ -98,10 +98,21 @@ function setupEventListeners() {
   commandInput.addEventListener("keydown", handleCommandInput);
 
   // Upload button
-  uploadBtn.addEventListener("click", handleFileUpload);
+  if (uploadBtn) {
+    uploadBtn.addEventListener('click', function() {
+      fileInput.click();
+    });
+  }
+
+  // File input change
+  if (fileInput) {
+    fileInput.addEventListener('change', handleFileUpload);
+  }
 
   // Execute button
-  executeBtn.addEventListener("click", executeUploadedFile);
+  if (executeBtn) {
+    executeBtn.addEventListener('click', executeUploadedFile);
+  }
 
   // File drop handling
   dropZone.addEventListener("dragover", (e) => {
@@ -243,78 +254,84 @@ async function validateSettings() {
   }
 }
 
-// Update the handleFileUpload function to validate settings first
+// Function to handle file upload
 async function handleFileUpload() {
+  // Check if a file is selected
+  if (!fileInput.files.length) {
+    showNotification('Please select a file first', 'error');
+    return;
+  }
+
   const file = fileInput.files[0];
-  if (!file) {
-    alert("Please select a file first");
-    return;
-  }
-
-  // Validate settings before proceeding
-  const settingsValid = await validateSettings();
-  if (!settingsValid) {
-    return;
-  }
-
-  // Switch to terminal view
-  showSection("terminalSection");
-
-  // Clear terminal and show upload message
-  terminalDiv.textContent = "";
-  window.appendToTerminal("Uploading file...");
-
-  // Upload the file
-  const success = await uploadFile(file);
-
-  // Execute the file immediately after upload
-  if (success) {
-    executeUploadedFile();
-  }
-}
-
-// Upload file to server
-async function uploadFile(file) {
   const formData = new FormData();
-  formData.append("file", file);
+  formData.append('file', file);
 
+  // Show loading state
+  uploadBtn.disabled = true;
+  uploadBtn.textContent = 'Uploading...';
+  
   try {
-    const response = await fetch("/upload", {
-      method: "POST",
-      body: formData,
+    console.log("Uploading file:", file.name);
+    const response = await fetch('/upload', {
+      method: 'POST',
+      body: formData
     });
 
     if (!response.ok) {
-      window.appendToTerminal(`Server error: ${response.statusText}`);
-      return false;
+      const errorText = await response.text();
+      throw new Error(errorText || `HTTP error ${response.status}`);
     }
 
+    // Get the response text
+    const responseText = await response.text();
+    
+    // Update UI
     uploadedFileName = file.name;
-    window.appendToTerminal("File uploaded successfully.");
-    return true;
+    uploadBtn.textContent = `Uploaded: ${file.name}`;
+    executeBtn.disabled = false;
+    
+    // Show success message
+    showNotification('File uploaded successfully', 'success');
+    appendToTerminal(responseText);
+    
+    // Auto-execute if checkbox is checked
+    if (document.getElementById('autoExecute').checked) {
+      executeUploadedFile();
+    }
   } catch (error) {
-    window.appendToTerminal(`Upload failed: ${error.message}`);
-    return false;
+    console.error("Error uploading file:", error);
+    showNotification(`Upload failed: ${error.message}`, 'error');
+    appendToTerminal(`Error: ${error.message}`);
+  } finally {
+    // Reset button state
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = 'Upload';
   }
 }
 
-// Execute the uploaded file
+// Function to execute the uploaded file
 function executeUploadedFile() {
   if (!uploadedFileName) {
-    window.appendToTerminal("No file has been uploaded yet.");
+    showNotification('Please upload a file first', 'error');
     return;
   }
-
-  window.appendToTerminal(`Executing ${uploadedFileName}...`);
-
-  if (!terminalConnected) {
-    connectWebSocket(() => {
-      sendCommand(`/tmp/${uploadedFileName}`);
-    });
-  } else {
-    sendCommand(`/tmp/${uploadedFileName}`);
-  }
+  
+  // Show terminal section
+  showSection('terminalSection');
+  
+  // Execute the file in GDB
+  appendToTerminal(`Executing ${uploadedFileName} in GDB...`);
+  sendCommand(`/tmp/${uploadedFileName}`);
 }
+
+// Make sure the upload button is not disabled by default
+document.addEventListener('DOMContentLoaded', function() {
+  const uploadBtn = document.getElementById('uploadBtn');
+  if (uploadBtn) {
+    uploadBtn.disabled = false;
+    uploadBtn.classList.remove("disabled-btn");
+  }
+});
 
 // Handle command input from the terminal
 function handleCommandInput(event) {
@@ -482,34 +499,47 @@ async function loadSettings() {
     }
 }
 
+// Update the saveSettings function to properly collect the current API key
 async function saveSettings() {
+  try {
+    // Get the current values from the form
     const provider = document.getElementById('provider').value;
     const model = document.getElementById('model').value;
     const apiKey = document.getElementById('apiKey').value;
     
-    currentSettings = { provider, model, apiKey };
+    // Update the currentSettings object
+    currentSettings = {
+      provider: provider,
+      model: model,
+      apiKey: apiKey
+    };
     
-    try {
-        const response = await fetch('/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(currentSettings)
-        });
-        
-        if (!response.ok) {
-            throw new Error('Failed to save settings');
-        }
-        
-        showNotification('Settings saved successfully', 'success');
-    } catch (error) {
-        console.error('Error saving settings:', error);
-        showNotification('Failed to save settings: ' + error.message, 'error');
+    console.log("Saving settings:", currentSettings);
+    
+    const response = await fetch('/save-settings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(currentSettings)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Error saving settings:", response.status, errorText);
+      throw new Error(errorText || `HTTP error ${response.status}`);
     }
+    
+    showNotification('Settings saved successfully', 'success');
+    return true;
+  } catch (error) {
+    console.error("Exception saving settings:", error);
+    showNotification(`Failed to save settings: ${error.message}`, 'error');
+    return false;
+  }
 }
 
-// Add new function to test the connection
+// Also update the testConnection function to use the form values directly
 async function testConnection() {
     const provider = document.getElementById('provider').value;
     const model = document.getElementById('model').value;
@@ -540,21 +570,29 @@ async function testConnection() {
             })
         });
         
+        testBtn.disabled = false;
+        saveBtn.disabled = false;
+        
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(errorText);
         }
         
-        const result = await response.json();
+        // Update currentSettings after successful test
+        currentSettings = {
+            provider,
+            model,
+            apiKey
+        };
+        
         window.appendToTerminal('Connection successful! Model is available.');
         showNotification('Connection test successful! The API key and model are valid.', 'success');
         
     } catch (error) {
-        window.appendToTerminal(`Connection failed: ${error.message}`);
-        showNotification(`Connection test failed: ${error.message}`, 'error');
-    } finally {
         testBtn.disabled = false;
         saveBtn.disabled = false;
+        window.appendToTerminal(`Connection failed: ${error.message}`);
+        showNotification(`Connection test failed: ${error.message}`, 'error');
     }
 }
 
@@ -640,3 +678,235 @@ async function updateUploadButtonState() {
     uploadBtn.disabled = true;
   }
 }
+
+// Chat functionality
+let chatHistory = [];
+let isWaitingForResponse = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Chat panel toggle
+    const openChatBtn = document.getElementById('openChatBtn');
+    const closeChatBtn = document.getElementById('closeChatBtn');
+    const chatPanel = document.getElementById('chatPanel');
+    const chatInput = document.getElementById('chatInput');
+    const sendChatBtn = document.getElementById('sendChatBtn');
+    const chatContent = document.getElementById('chatContent');
+    const chatModelInfo = document.getElementById('chatModelInfo');
+
+    // Initialize chat panel
+    function initChatPanel() {
+        // Add welcome message
+        addMessageToChat('assistant', 'Hello! I\'m your AI assistant. How can I help you with your code today?');
+        
+        // Update model info
+        updateChatModelInfo();
+    }
+
+    // Open chat panel
+    openChatBtn.addEventListener('click', function() {
+        chatPanel.classList.add('open');
+        chatInput.focus();
+    });
+
+    // Close chat panel
+    closeChatBtn.addEventListener('click', function() {
+        chatPanel.classList.remove('open');
+    });
+
+    // Send message when button is clicked
+    sendChatBtn.addEventListener('click', sendChatMessage);
+
+    // Send message when Enter is pressed (but allow Shift+Enter for new lines)
+    chatInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendChatMessage();
+        }
+    });
+
+    // Auto-resize textarea as user types
+    chatInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
+
+    // Function to send chat message
+    function sendChatMessage() {
+        if (isWaitingForResponse) return;
+        
+        const message = chatInput.value.trim();
+        if (!message) return;
+        
+        // Add user message to chat
+        addMessageToChat('user', message);
+        
+        // Clear input
+        chatInput.value = '';
+        chatInput.style.height = 'auto';
+        
+        // Show loading indicator
+        showLoadingIndicator();
+        
+        // Send to backend
+        sendToLLM(message);
+    }
+
+    // Function to add message to chat
+    function addMessageToChat(role, content) {
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('chat-message');
+        messageDiv.classList.add(role === 'user' ? 'user-message' : 'assistant-message');
+        
+        // Store in history
+        chatHistory.push({ role, content });
+        
+        // For assistant messages, we'll need to render markdown
+        if (role === 'assistant') {
+            // Simple markdown rendering for code blocks
+            // A more complete solution would use a library like marked.js
+            const formattedContent = content.replace(/```(\w*)([\s\S]*?)```/g, 
+                '<pre><code class="language-$1">$2</code></pre>');
+            messageDiv.innerHTML = formattedContent;
+        } else {
+            messageDiv.textContent = content;
+        }
+        
+        chatContent.appendChild(messageDiv);
+        chatContent.scrollTop = chatContent.scrollHeight;
+    }
+
+    // Function to show loading indicator
+    function showLoadingIndicator() {
+        isWaitingForResponse = true;
+        sendChatBtn.disabled = true;
+        
+        const loadingDiv = document.createElement('div');
+        loadingDiv.classList.add('chat-message', 'assistant-message', 'loading-indicator');
+        loadingDiv.id = 'loadingIndicator';
+        loadingDiv.innerHTML = 'Thinking <span></span><span></span><span></span>';
+        
+        chatContent.appendChild(loadingDiv);
+        chatContent.scrollTop = chatContent.scrollHeight;
+    }
+
+    // Function to hide loading indicator
+    function hideLoadingIndicator() {
+        isWaitingForResponse = false;
+        sendChatBtn.disabled = false;
+        
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        if (loadingIndicator) {
+            loadingIndicator.remove();
+        }
+    }
+
+    // Function to send message to LLM
+    function sendToLLM(message) {
+        // Prepare the request data
+        const requestData = {
+            message: message,
+            history: chatHistory.slice(0, -1) // Exclude the latest user message as it's sent separately
+        };
+
+        // Send to backend
+        fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            hideLoadingIndicator();
+            addMessageToChat('assistant', data.response);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            hideLoadingIndicator();
+            addMessageToChat('assistant', 'Sorry, I encountered an error. Please try again.');
+        });
+    }
+
+    // Function to update model info in the chat footer
+    function updateChatModelInfo() {
+        fetch('/api/settings')
+        .then(response => response.json())
+        .then(data => {
+            chatModelInfo.textContent = data.model;
+        })
+        .catch(error => {
+            console.error('Error fetching settings:', error);
+        });
+    }
+
+    // Initialize chat when page loads
+    initChatPanel();
+});
+
+// Set up drag and drop functionality
+function setupDragAndDrop() {
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    
+    if (!dropZone || !fileInput) return;
+    
+    // Prevent default drag behaviors
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    // Highlight drop zone when item is dragged over it
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, highlight, false);
+    });
+    
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, unhighlight, false);
+    });
+    
+    // Handle dropped files
+    dropZone.addEventListener('drop', handleDrop, false);
+    
+    // Handle file input change
+    fileInput.addEventListener('change', handleFileInputChange, false);
+    
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    function highlight() {
+        dropZone.classList.add('highlight');
+    }
+    
+    function unhighlight() {
+        dropZone.classList.remove('highlight');
+    }
+    
+    function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        
+        if (files.length) {
+            fileInput.files = files;
+            handleFileUpload();
+        }
+    }
+    
+    function handleFileInputChange() {
+        // The upload button will be clicked manually
+    }
+}
+
+// Call this when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+    setupDragAndDrop();
+    setupEventListeners();
+});

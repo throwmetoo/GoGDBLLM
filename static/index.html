@@ -230,9 +230,23 @@
 
         <div id="uploadSection" class="active">
             <h1>Upload a File</h1>
-            <div id="dropZone">Drop file here</div>
-            <input type="file" id="fileInput" />
-            <button id="uploadBtn">Upload</button>
+            <div class="upload-area">
+                <div id="dropZone">
+                    <p>Drop file here</p>
+                    <p>or</p>
+                    <label for="fileInput" class="file-input-label">Browse Files</label>
+                    <input type="file" id="fileInput" class="file-input">
+                </div>
+                
+                <div class="upload-controls">
+                    <button id="uploadBtn" class="btn">Upload Selected File</button>
+                    <div id="uploadStatus"></div>
+                    <div class="auto-execute">
+                        <input type="checkbox" id="autoExecute">
+                        <label for="autoExecute">Auto-execute after upload</label>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="terminalSection">
@@ -275,24 +289,24 @@
             </div>
         </div>
 
-        <div id="chatPanel" class="chat-panel">
+        <button class="open-chat-btn" id="openChatBtn">💬</button>
+
+        <div class="chat-panel" id="chatPanel">
             <div class="chat-header">
-                <h3>Terminal Output</h3>
+                <h3>AI Assistant</h3>
                 <button id="closeChatBtn">&times;</button>
             </div>
-            <div id="chatContent" class="chat-content">
-                <div id="terminalOutput" class="terminal-output"></div>
+            <div class="chat-content" id="chatContent">
+                <!-- Messages will be added here dynamically -->
+            </div>
+            <div class="chat-input-container">
+                <textarea id="chatInput" placeholder="Ask a question..."></textarea>
+                <button id="sendChatBtn">Send</button>
             </div>
             <div class="chat-footer">
-                <p class="chat-note">
-                    This is a proof of concept. LLM integration coming soon.
-                </p>
+                <p>Using <span id="chatModelInfo">Claude 3 Sonnet</span></p>
             </div>
         </div>
-
-        <button id="openChatBtn" class="open-chat-btn">
-            <span>💬</span>
-        </button>
 
         <div id="notification" class="notification">
             <span id="notificationMessage"></span>

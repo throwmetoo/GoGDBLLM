@@ -3,10 +3,13 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 )
+
+const settingsFile = ".gogdbllm_settings.json"
 
 // Settings represents the application settings
 type Settings struct {
@@ -30,7 +33,7 @@ func NewSettingsManager(filePath string) (*SettingsManager, error) {
 		if err != nil {
 			return nil, err
 		}
-		filePath = filepath.Join(homeDir, ".fileopener_settings.json")
+		filePath = filepath.Join(homeDir, settingsFile)
 	}
 
 	manager := &SettingsManager{
@@ -91,9 +94,68 @@ func (sm *SettingsManager) GetSettings() Settings {
 }
 
 // UpdateSettings updates the settings
-func (sm *SettingsManager) UpdateSettings(settings Settings) error {
+func (sm *SettingsManager) UpdateSettings(settings Settings) {
 	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
 	sm.settings = settings
-	sm.mutex.Unlock()
-	return sm.Save()
+}
+
+// SaveSettings saves the settings to a file
+func (sm *SettingsManager) SaveSettings(settings Settings) error {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	// Update the settings in memory
+	sm.settings = settings
+
+	// Marshal the settings to JSON
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	// Write the settings to the file in the current directory
+	if err := os.WriteFile(settingsFile, data, 0600); err != nil {
+		return fmt.Errorf("failed to write settings file: %w", err)
+	}
+
+	return nil
+}
+
+// LoadSettings loads the settings from a file
+func (sm *SettingsManager) LoadSettings() (Settings, error) {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	// Try to read from current directory first
+	data, err := os.ReadFile(settingsFile)
+	if err != nil {
+		// If not found in current directory, try home directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return Settings{}, fmt.Errorf("failed to get home directory: %w", err)
+		}
+
+		settingsPath := filepath.Join(homeDir, settingsFile)
+		data, err = os.ReadFile(settingsPath)
+		if err != nil {
+			// If not found anywhere, return default settings
+			return Settings{
+				Provider: "openai",
+				Model:    "gpt-3.5-turbo",
+				APIKey:   "",
+			}, nil
+		}
+	}
+
+	// Unmarshal the settings
+	var settings Settings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return Settings{}, fmt.Errorf("failed to unmarshal settings: %w", err)
+	}
+
+	// Update the settings in memory
+	sm.settings = settings
+
+	return settings, nil
 }

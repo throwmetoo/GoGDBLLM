@@ -138,23 +138,23 @@ The chat panel provides AI assistance during debugging sessions:
 
 ## Implementation Roadmap
 
-1. **Phase 1 (In Progress)**
+1. **Phase 1**
    - Basic file upload and execution
    - GDB integration with terminal emulation
    - Settings management
    - Simple chat interface
 
-2. **Phase 2 (Planned)**
+2. **Phase 2**
    - Improved chat UI with better formatting
    - Context-aware LLM prompts
    - Enhanced error handling
 
-3. **Phase 3 (Planned)**
+3. **Phase 3**
    - Advanced debugging assistance
    - Code explanation features
    - Performance optimizations
 
-4. **Phase 4 (Future)**
+4. **Phase 4**
    - Collaboration tools
    - Session management
    - Extended provider support
