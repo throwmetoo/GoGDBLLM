@@ -25,6 +25,7 @@ go.work
 .DS_Store
 
 # Application specific
+.gogdbllm_settings.json
 *.pem
 *.key
 
