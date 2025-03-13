@@ -472,60 +472,79 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleChatRequest processes chat requests
 func (s *Server) handleChatRequest(w http.ResponseWriter, r *http.Request) {
 	// Parse request
-	var chatReq ChatRequest
+	var chatReq struct {
+		Message string `json:"message"`
+		History []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"history"`
+		TerminalOutput string `json:"terminalOutput"`
+	}
+
 	if err := json.NewDecoder(r.Body).Decode(&chatReq); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		log.Printf("Error parsing chat request: %v", err)
+		http.Error(w, "Invalid request format: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Get terminal output if available
-	terminalOutput := s.getLatestTerminalOutput() // You'll need to implement this function
+	// Get settings
+	settings := s.settingsManager.GetSettings()
 
-	// If we have terminal output, include it in the message
-	if terminalOutput != "" && !strings.Contains(chatReq.Message, "terminal output:") {
-		chatReq.Message = fmt.Sprintf("Terminal output:\n```\n%s\n```\n\nUser question: %s",
-			terminalOutput, chatReq.Message)
+	// Check if API key is configured
+	if settings.APIKey == "" {
+		http.Error(w, "API key not configured. Please set up your AI provider settings.", http.StatusBadRequest)
+		return
 	}
 
-	// Process chat request
-	response, err := s.ProcessChatRequest(chatReq)
+	// Convert to the format expected by the chat processor
+	processReq := ChatRequest{
+		Message: chatReq.Message,
+		History: []ChatMessage{},
+	}
+
+	// Add history
+	for _, msg := range chatReq.History {
+		processReq.History = append(processReq.History, ChatMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+
+	// Include terminal output if available
+	if chatReq.TerminalOutput != "" && !strings.Contains(chatReq.Message, "terminal output") {
+		processReq.Message = fmt.Sprintf("Terminal output:\n```\n%s\n```\n\nUser question: %s",
+			chatReq.TerminalOutput, chatReq.Message)
+	}
+
+	// Process the chat request using the existing function in chat.go
+	var response string
+	var err error
+
+	// Call the appropriate API based on the provider
+	switch settings.Provider {
+	case "anthropic":
+		response, err = s.callAnthropicAPI(processReq, settings)
+	case "openai":
+		response, err = s.callOpenAIAPI(processReq, settings)
+	case "openrouter":
+		response, err = s.callOpenRouterAPI(processReq, settings)
+	default:
+		http.Error(w, "Unsupported provider", http.StatusBadRequest)
+		return
+	}
+
 	if err != nil {
-		http.Error(w, "Error processing chat: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("Error calling LLM API: %v", err)
+		http.Error(w, fmt.Sprintf("Error calling LLM API: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Return response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"response": response})
-}
-
-// getLatestTerminalOutput retrieves the latest terminal output
-// This is a placeholder - you'll need to implement this based on how you're storing terminal output
-func (s *Server) getLatestTerminalOutput() string {
-	// This is where you would retrieve the latest terminal output
-	// For example, you might keep a buffer of recent terminal output
-	// or retrieve it from a session variable
-
-	// For now, return an empty string
-	return s.terminalBuffer.String() // Assuming you have a terminalBuffer field in your Server struct
-}
-
-// Add this to your terminal output handling code
-func (s *Server) appendToTerminalBuffer(data []byte) {
-	s.bufferMutex.Lock()
-	defer s.bufferMutex.Unlock()
-
-	// Limit buffer size to prevent memory issues (e.g., last 10KB)
-	if s.terminalBuffer.Len() > 10240 {
-		// Clear and keep only the last 5KB
-		buf := s.terminalBuffer.Bytes()
-		s.terminalBuffer.Reset()
-		s.terminalBuffer.Write(buf[len(buf)-5120:])
-	}
-
-	s.terminalBuffer.Write(data)
 }
 
 // handleSaveSettings handles the request to save settings

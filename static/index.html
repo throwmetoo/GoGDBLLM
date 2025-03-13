@@ -289,24 +289,22 @@
             </div>
         </div>
 
-        <button class="open-chat-btn" id="openChatBtn">💬</button>
-
-        <div class="chat-panel" id="chatPanel">
+        <div id="chatPanel" class="chat-panel">
             <div class="chat-header">
-                <h3>AI Assistant</h3>
-                <button id="closeChatBtn">&times;</button>
+                <h2>AI Assistant</h2>
+                <button id="closeChatBtn" onclick="toggleChat()">✕</button>
             </div>
-            <div class="chat-content" id="chatContent">
-                <!-- Messages will be added here dynamically -->
-            </div>
+            <div id="chatMessages" class="chat-messages"></div>
             <div class="chat-input-container">
-                <textarea id="chatInput" placeholder="Ask a question..."></textarea>
+                <textarea id="chatInput" placeholder="Ask a question about your code or debugging..."></textarea>
                 <button id="sendChatBtn">Send</button>
             </div>
             <div class="chat-footer">
-                <p>Using <span id="chatModelInfo">Claude 3 Sonnet</span></p>
+                <span id="modelInfo">Using model: <span id="currentModel">Loading...</span></span>
             </div>
         </div>
+
+        <button class="open-chat-btn" id="openChatBtn">💬</button>
 
         <div id="notification" class="notification">
             <span id="notificationMessage"></span>

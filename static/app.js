@@ -681,172 +681,220 @@ async function updateUploadButtonState() {
 
 // Chat functionality
 let chatHistory = [];
-let isWaitingForResponse = false;
+let isChatOpen = false;
 
+// Function to send a chat message
+async function sendChatMessage() {
+  const messageInput = document.getElementById('chatInput');
+  const message = messageInput.value.trim();
+  
+  if (!message) return;
+  
+  // Clear input
+  messageInput.value = '';
+  
+  // Add user message to chat
+  addMessageToChat('user', message);
+  
+  // Show loading indicator
+  const loadingIndicator = document.createElement('div');
+  loadingIndicator.className = 'loading-indicator';
+  loadingIndicator.innerHTML = 'AI is thinking<span></span><span></span><span></span>';
+  document.getElementById('chatMessages').appendChild(loadingIndicator);
+  
+  try {
+    console.log("Sending chat message:", message);
+    console.log("Chat history:", chatHistory);
+    
+    // Get terminal output for context
+    const terminalOutput = document.getElementById('terminal').innerText;
+    
+    // Prepare request
+    const chatRequest = {
+      message: message,
+      history: chatHistory,
+      terminalOutput: terminalOutput
+    };
+    
+    // Send request to server
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(chatRequest)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `HTTP error ${response.status}`);
+    }
+    
+    // Parse response
+    const data = await response.json();
+    
+    // Remove loading indicator
+    document.querySelector('.loading-indicator').remove();
+    
+    // Add assistant message to chat
+    addMessageToChat('assistant', data.response);
+    
+  } catch (error) {
+    console.error("Error sending chat message:", error);
+    
+    // Remove loading indicator
+    const loadingIndicator = document.querySelector('.loading-indicator');
+    if (loadingIndicator) {
+      loadingIndicator.remove();
+    }
+    
+    // Add error message to chat
+    addMessageToChat('assistant', `Error: ${error.message}. Please check your API settings and try again.`);
+  }
+}
+
+// Function to add a message to the chat
+function addMessageToChat(role, content) {
+  // Create message element
+  const messageElement = document.createElement('div');
+  messageElement.className = `${role}-message`;
+  
+  // Format content with markdown
+  const formattedContent = formatMarkdown(content);
+  messageElement.innerHTML = formattedContent;
+  
+  // Add to chat container
+  document.getElementById('chatMessages').appendChild(messageElement);
+  
+  // Scroll to bottom
+  scrollChatToBottom();
+  
+  // Add to history
+  chatHistory.push({ role, content });
+  
+  // Limit history length to prevent excessive token usage
+  if (chatHistory.length > 20) {
+    chatHistory = chatHistory.slice(chatHistory.length - 20);
+  }
+}
+
+// Function to scroll chat to bottom
+function scrollChatToBottom() {
+  const chatMessages = document.getElementById('chatMessages');
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// Function to format markdown
+function formatMarkdown(text) {
+  // Code blocks
+  text = text.replace(/```(\w*)([\s\S]*?)```/g, function(match, language, code) {
+    return `<pre><code class="language-${language}">${escapeHtml(code.trim())}</code></pre>`;
+  });
+  
+  // Inline code
+  text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+  
+  // Bold
+  text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  
+  // Italic
+  text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  
+  // Headers
+  text = text.replace(/^### (.*$)/gm, '<h3>$1</h3>');
+  text = text.replace(/^## (.*$)/gm, '<h2>$1</h2>');
+  text = text.replace(/^# (.*$)/gm, '<h1>$1</h1>');
+  
+  // Lists
+  text = text.replace(/^\s*\- (.*$)/gm, '<li>$1</li>');
+  text = text.replace(/<\/li>\n<li>/g, '</li><li>');
+  text = text.replace(/(<li>.*<\/li>)/g, '<ul>$1</ul>');
+  
+  // Line breaks
+  text = text.replace(/\n/g, '<br>');
+  
+  return text;
+}
+
+// Helper function to escape HTML
+function escapeHtml(unsafe) {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Function to toggle chat panel
+function toggleChat() {
+  const chatPanel = document.getElementById('chatPanel');
+  const openChatBtn = document.getElementById('openChatBtn');
+  
+  if (isChatOpen) {
+    chatPanel.style.right = '-400px';
+    openChatBtn.innerHTML = '💬';
+  } else {
+    chatPanel.style.right = '0';
+    openChatBtn.innerHTML = '✕';
+    
+    // Focus on input
+    document.getElementById('chatInput').focus();
+    
+    // Add terminal output to chat if it's the first message
+    if (chatHistory.length === 0) {
+      const terminalOutput = document.getElementById('terminal').innerText;
+      if (terminalOutput.trim()) {
+        addMessageToChat('system', 'Terminal Output:\n```\n' + terminalOutput + '\n```');
+      }
+    }
+    
+    // Scroll to bottom when opening
+    setTimeout(scrollChatToBottom, 100);
+  }
+  
+  isChatOpen = !isChatOpen;
+}
+
+// Add this to your setupEventListeners function
+function setupChatEventListeners() {
+  // Open chat button
+  const openChatBtn = document.getElementById('openChatBtn');
+  if (openChatBtn) {
+    openChatBtn.addEventListener('click', toggleChat);
+  }
+  
+  // Send button
+  const sendBtn = document.getElementById('sendChatBtn');
+  if (sendBtn) {
+    sendBtn.addEventListener('click', sendChatMessage);
+  }
+  
+  // Input enter key
+  const chatInput = document.getElementById('chatInput');
+  if (chatInput) {
+    chatInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
+}
+
+// Make sure to call this in your DOMContentLoaded event
 document.addEventListener('DOMContentLoaded', function() {
-    // Chat panel toggle
-    const openChatBtn = document.getElementById('openChatBtn');
-    const closeChatBtn = document.getElementById('closeChatBtn');
-    const chatPanel = document.getElementById('chatPanel');
-    const chatInput = document.getElementById('chatInput');
-    const sendChatBtn = document.getElementById('sendChatBtn');
-    const chatContent = document.getElementById('chatContent');
-    const chatModelInfo = document.getElementById('chatModelInfo');
-
-    // Initialize chat panel
-    function initChatPanel() {
-        // Add welcome message
-        addMessageToChat('assistant', 'Hello! I\'m your AI assistant. How can I help you with your code today?');
-        
-        // Update model info
-        updateChatModelInfo();
+  setupDragAndDrop();
+  setupEventListeners();
+  setupChatEventListeners();
+  
+  // Validate settings on page load
+  validateSettings().then(valid => {
+    if (!valid) {
+      showNotification('Please configure your AI provider settings first', 'error');
+      showSection('settingsSection');
     }
-
-    // Open chat panel
-    openChatBtn.addEventListener('click', function() {
-        chatPanel.classList.add('open');
-        chatInput.focus();
-    });
-
-    // Close chat panel
-    closeChatBtn.addEventListener('click', function() {
-        chatPanel.classList.remove('open');
-    });
-
-    // Send message when button is clicked
-    sendChatBtn.addEventListener('click', sendChatMessage);
-
-    // Send message when Enter is pressed (but allow Shift+Enter for new lines)
-    chatInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendChatMessage();
-        }
-    });
-
-    // Auto-resize textarea as user types
-    chatInput.addEventListener('input', function() {
-        this.style.height = 'auto';
-        this.style.height = (this.scrollHeight) + 'px';
-    });
-
-    // Function to send chat message
-    function sendChatMessage() {
-        if (isWaitingForResponse) return;
-        
-        const message = chatInput.value.trim();
-        if (!message) return;
-        
-        // Add user message to chat
-        addMessageToChat('user', message);
-        
-        // Clear input
-        chatInput.value = '';
-        chatInput.style.height = 'auto';
-        
-        // Show loading indicator
-        showLoadingIndicator();
-        
-        // Send to backend
-        sendToLLM(message);
-    }
-
-    // Function to add message to chat
-    function addMessageToChat(role, content) {
-        const messageDiv = document.createElement('div');
-        messageDiv.classList.add('chat-message');
-        messageDiv.classList.add(role === 'user' ? 'user-message' : 'assistant-message');
-        
-        // Store in history
-        chatHistory.push({ role, content });
-        
-        // For assistant messages, we'll need to render markdown
-        if (role === 'assistant') {
-            // Simple markdown rendering for code blocks
-            // A more complete solution would use a library like marked.js
-            const formattedContent = content.replace(/```(\w*)([\s\S]*?)```/g, 
-                '<pre><code class="language-$1">$2</code></pre>');
-            messageDiv.innerHTML = formattedContent;
-        } else {
-            messageDiv.textContent = content;
-        }
-        
-        chatContent.appendChild(messageDiv);
-        chatContent.scrollTop = chatContent.scrollHeight;
-    }
-
-    // Function to show loading indicator
-    function showLoadingIndicator() {
-        isWaitingForResponse = true;
-        sendChatBtn.disabled = true;
-        
-        const loadingDiv = document.createElement('div');
-        loadingDiv.classList.add('chat-message', 'assistant-message', 'loading-indicator');
-        loadingDiv.id = 'loadingIndicator';
-        loadingDiv.innerHTML = 'Thinking <span></span><span></span><span></span>';
-        
-        chatContent.appendChild(loadingDiv);
-        chatContent.scrollTop = chatContent.scrollHeight;
-    }
-
-    // Function to hide loading indicator
-    function hideLoadingIndicator() {
-        isWaitingForResponse = false;
-        sendChatBtn.disabled = false;
-        
-        const loadingIndicator = document.getElementById('loadingIndicator');
-        if (loadingIndicator) {
-            loadingIndicator.remove();
-        }
-    }
-
-    // Function to send message to LLM
-    function sendToLLM(message) {
-        // Prepare the request data
-        const requestData = {
-            message: message,
-            history: chatHistory.slice(0, -1) // Exclude the latest user message as it's sent separately
-        };
-
-        // Send to backend
-        fetch('/api/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(requestData)
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-            return response.json();
-        })
-        .then(data => {
-            hideLoadingIndicator();
-            addMessageToChat('assistant', data.response);
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            hideLoadingIndicator();
-            addMessageToChat('assistant', 'Sorry, I encountered an error. Please try again.');
-        });
-    }
-
-    // Function to update model info in the chat footer
-    function updateChatModelInfo() {
-        fetch('/api/settings')
-        .then(response => response.json())
-        .then(data => {
-            chatModelInfo.textContent = data.model;
-        })
-        .catch(error => {
-            console.error('Error fetching settings:', error);
-        });
-    }
-
-    // Initialize chat when page loads
-    initChatPanel();
+  });
 });
 
 // Set up drag and drop functionality
@@ -904,9 +952,3 @@ function setupDragAndDrop() {
         // The upload button will be clicked manually
     }
 }
-
-// Call this when the page loads
-document.addEventListener('DOMContentLoaded', function() {
-    setupDragAndDrop();
-    setupEventListeners();
-});
