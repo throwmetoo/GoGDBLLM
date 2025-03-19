@@ -9,7 +9,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/throwmetoo/gogdbllm/internal/config"
+	"github.com/throwmetoo/GoGDBLLM/internal/config"
 )
 
 // OpenRouterClient implements the Client interface for OpenRouter

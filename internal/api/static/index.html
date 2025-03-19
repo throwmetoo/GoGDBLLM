@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoGDBLLM - GDB with LLM Assistant</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>GoGDBLLM</h1>
+            <div class="header-buttons">
+                <button id="settings-btn" class="btn">Settings</button>
+                <button id="upload-btn" class="btn">Upload</button>
+            </div>
+        </header>
+
+        <main>
+            <div class="left-panel">
+                <div class="debugger-panel">
+                    <div class="panel-header">
+                        <h2>Debugger</h2>
+                        <div class="debugger-controls">
+                            <button id="start-debugger-btn" class="btn">Start GDB</button>
+                            <button id="stop-debugger-btn" class="btn" disabled>Stop GDB</button>
+                        </div>
+                    </div>
+                    <div class="debugger-output" id="debugger-output"></div>
+                    <div class="debugger-input-container">
+                        <input type="text" id="debugger-input" placeholder="Enter GDB command..." disabled>
+                        <button id="send-command-btn" class="btn" disabled>Send</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-panel">
+                <div class="chat-panel">
+                    <div class="panel-header">
+                        <h2>LLM Assistant</h2>
+                    </div>
+                    <div class="chat-messages" id="chat-messages"></div>
+                    <div class="chat-input-container">
+                        <textarea id="chat-input" placeholder="Ask a question about your debugging session..."></textarea>
+                        <button id="send-chat-btn" class="btn">Send</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <div id="settings-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <form id="settings-form">
+                        <div class="form-group">
+                            <label for="provider">LLM Provider</label>
+                            <select id="provider" name="provider">
+                                <option value="anthropic">Anthropic</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="openrouter">OpenRouter</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="model">Model</label>
+                            <select id="model" name="model"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="api-key">API Key</label>
+                            <input type="password" id="api-key" name="apiKey">
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="test-connection-btn" class="btn">Test Connection</button>
+                            <button type="submit" class="btn btn-primary">Save</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div id="upload-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Upload Binary</h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <form id="upload-form">
+                        <div class="form-group">
+                            <label for="file-upload">Select Binary File</label>
+                            <input type="file" id="file-upload" name="file">
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">Upload</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js" type="module"></script>
+</body>
+</html> 

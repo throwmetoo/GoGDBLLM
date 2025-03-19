@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/throwmetoo/gogdbllm/internal/api/response"
-	"github.com/throwmetoo/gogdbllm/internal/config"
+	"github.com/throwmetoo/GoGDBLLM/internal/api/response"
+	"github.com/throwmetoo/GoGDBLLM/internal/config"
 )
 
 // handleSettings handles settings requests
@@ -63,11 +63,13 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSaveSettings handles requests to save settings
+// Note: This is an alias for updateSettings and is kept for backward compatibility
 func (h *Handler) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
-	// ... existing code ...
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		response.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "Settings saved successfully",
-	})
+	// Delegate to updateSettings
+	h.updateSettings(w, r)
 }

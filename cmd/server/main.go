@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/throwmetoo/gogdbllm/internal/api"
-	"github.com/throwmetoo/gogdbllm/internal/config"
-	"github.com/throwmetoo/gogdbllm/internal/debugger"
-	"github.com/throwmetoo/gogdbllm/internal/llm"
-	"github.com/throwmetoo/gogdbllm/internal/websocket"
+	"github.com/throwmetoo/GoGDBLLM/internal/api"
+	"github.com/throwmetoo/GoGDBLLM/internal/config"
+	"github.com/throwmetoo/GoGDBLLM/internal/debugger"
+	"github.com/throwmetoo/GoGDBLLM/internal/llm"
+	"github.com/throwmetoo/GoGDBLLM/internal/websocket"
 )
 
 func main() {
@@ -37,6 +37,9 @@ func main() {
 	debuggerSvc := debugger.NewService(logger, cfg.GDBPath)
 	llmClient := llm.NewClient(cfg.LLMSettings, logger)
 	wsManager := websocket.NewManager(logger)
+
+	// Set the debugger service on the WebSocket manager
+	wsManager.SetDebuggerService(debuggerSvc)
 
 	// Create API handlers
 	apiHandler := api.NewHandler(

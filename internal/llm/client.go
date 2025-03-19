@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/throwmetoo/gogdbllm/internal/config"
+	"github.com/throwmetoo/GoGDBLLM/internal/config"
 )
 
 // Client defines the interface for LLM clients
@@ -41,4 +41,16 @@ func (f *Factory) CreateClient(settings config.LLMSettings) (Client, error) {
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", settings.Provider)
 	}
+}
+
+// NewClient creates a new LLM client based on the provided settings
+// This is a convenience function for direct client creation
+func NewClient(settings config.LLMSettings, logger *log.Logger) Client {
+	factory := NewFactory(logger)
+	client, err := factory.CreateClient(settings)
+	if err != nil {
+		logger.Printf("Warning: Failed to create LLM client: %v", err)
+		return nil
+	}
+	return client
 }

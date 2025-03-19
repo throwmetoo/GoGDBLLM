@@ -150,6 +150,39 @@ func (g *GDBService) Stop() error {
 	return nil
 }
 
+// Add this method to your GDBService struct
+func (g *GDBService) stopProcess() error {
+	if g.cmd == nil || g.cmd.Process == nil {
+		return nil // Already stopped
+	}
+
+	// Send quit command to GDB
+	if g.stdin != nil {
+		fmt.Fprintln(g.stdin, "quit")
+		fmt.Fprintln(g.stdin, "y")
+	}
+
+	// Give GDB a chance to exit gracefully
+	done := make(chan error, 1)
+	go func() {
+		done <- g.cmd.Wait()
+	}()
+
+	// Wait for process to exit or force kill after timeout
+	select {
+	case <-done:
+		// Process exited gracefully
+	case <-time.After(3 * time.Second):
+		// Force kill if it doesn't exit
+		g.logger.Println("GDB didn't exit gracefully, forcing termination")
+		if err := g.cmd.Process.Kill(); err != nil {
+			return fmt.Errorf("failed to kill GDB process: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // SendCommand sends a command to GDB
 func (g *GDBService) SendCommand(command string) error {
 	g.mu.Lock()

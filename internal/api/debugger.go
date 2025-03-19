@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/throwmetoo/gogdbllm/internal/api/response"
+	"github.com/throwmetoo/GoGDBLLM/internal/api/response"
 )
 
 // StartDebuggerRequest represents a request to start the debugger

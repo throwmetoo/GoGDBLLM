@@ -3,10 +3,23 @@ package websocket
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/throwmetoo/GoGDBLLM/internal/debugger"
 )
+
+// Add this variable as a field in the Manager struct
+type Manager struct {
+	clients      map[chan string]bool
+	clientsMutex sync.Mutex
+	logger       *log.Logger
+	upgrader     websocket.Upgrader
+	debuggerSvc  debugger.Service
+	isGDBRunning bool // Add this field
+}
 
 // Handler returns an http.HandlerFunc for WebSocket connections
 func (m *Manager) Handler() http.HandlerFunc {
@@ -65,15 +78,16 @@ func (m *Manager) Handler() http.HandlerFunc {
 			// Process message based on type
 			switch message.Type {
 			case "debugger_command":
-				if !isGDBRunning {
+				// Then replace the direct reference to isGDBRunning with m.isGDBRunning
+				if !m.isGDBRunning {
 					conn.WriteMessage(websocket.TextMessage, []byte("Error: GDB is not running. Please start the debugger first"))
 					continue
 				}
 
-				// Send command to GDB's stdin
-				_, err := fmt.Fprintln(m.debuggerSvc.GetStdin(), message.Command)
+				// Send command to GDB using SendCommand method
+				err := m.debuggerSvc.SendCommand(message.Command)
 				if err != nil {
-					m.logger.Printf("Error writing to GDB stdin: %v", err)
+					m.logger.Printf("Error sending command to GDB: %v", err)
 					conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
 				}
 
@@ -87,4 +101,67 @@ func (m *Manager) Handler() http.HandlerFunc {
 			}
 		}
 	}
+}
+
+// NewManager creates a new websocket manager
+func NewManager(logger *log.Logger) *Manager {
+	return &Manager{
+		clients:      make(map[chan string]bool),
+		clientsMutex: sync.Mutex{},
+		logger:       logger,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				return true // Allow all origins for now
+			},
+		},
+		isGDBRunning: false,
+	}
+}
+
+// RegisterOutputChannel registers an output channel from the debugger
+func (m *Manager) RegisterOutputChannel(ch <-chan string) {
+	go func() {
+		for msg := range ch {
+			m.clientsMutex.Lock()
+			for client := range m.clients {
+				select {
+				case client <- msg:
+					// Message sent successfully
+				default:
+					// Channel buffer is full, skip this message
+					m.logger.Printf("Client channel buffer full, dropping message")
+				}
+			}
+			m.clientsMutex.Unlock()
+		}
+	}()
+}
+
+// UnregisterOutputChannel unregisters an output channel
+func (m *Manager) UnregisterOutputChannel(ch <-chan string) {
+	// Nothing to do here, the channel should be closed by the owner
+}
+
+// Shutdown closes all client connections
+func (m *Manager) Shutdown() {
+	m.clientsMutex.Lock()
+	defer m.clientsMutex.Unlock()
+
+	// Close all client channels
+	for client := range m.clients {
+		close(client)
+		delete(m.clients, client)
+	}
+}
+
+// SetDebuggerService sets the debugger service
+func (m *Manager) SetDebuggerService(svc debugger.Service) {
+	m.debuggerSvc = svc
+}
+
+// SetGDBRunning sets the GDB running state
+func (m *Manager) SetGDBRunning(running bool) {
+	m.isGDBRunning = running
 }

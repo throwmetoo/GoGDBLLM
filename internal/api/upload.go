@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/throwmetoo/gogdbllm/internal/api/response"
+	"github.com/throwmetoo/GoGDBLLM/internal/api/response"
 )
 
 // handleUpload handles file uploads

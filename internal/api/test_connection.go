@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/throwmetoo/gogdbllm/internal/api/response"
-	"github.com/throwmetoo/gogdbllm/internal/config"
+	"github.com/throwmetoo/GoGDBLLM/internal/api/response"
+	"github.com/throwmetoo/GoGDBLLM/internal/config"
 )
 
 // TestConnectionRequest represents a request to test an LLM connection

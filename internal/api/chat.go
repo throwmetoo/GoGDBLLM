@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/throwmetoo/gogdbllm/internal/api/response"
-	"github.com/throwmetoo/gogdbllm/internal/llm"
+	"github.com/throwmetoo/GoGDBLLM/internal/api/response"
+	"github.com/throwmetoo/GoGDBLLM/internal/llm"
 )
 
 // handleChat handles chat requests

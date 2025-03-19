@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/throwmetoo/gogdbllm/internal/config"
+	"github.com/throwmetoo/GoGDBLLM/internal/config"
 )
 
 // Service provides a high-level interface for LLM operations

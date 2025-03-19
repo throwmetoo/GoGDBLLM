@@ -5,13 +5,13 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/throwmetoo/gogdbllm/internal/config"
-	"github.com/throwmetoo/gogdbllm/internal/debugger"
-	"github.com/throwmetoo/gogdbllm/internal/llm"
-	"github.com/throwmetoo/gogdbllm/internal/websocket"
+	"github.com/throwmetoo/GoGDBLLM/internal/config"
+	"github.com/throwmetoo/GoGDBLLM/internal/debugger"
+	"github.com/throwmetoo/GoGDBLLM/internal/llm"
+	"github.com/throwmetoo/GoGDBLLM/internal/websocket"
 )
 
-//go:embed static
+//go:embed static/index.html static/js/* static/css/*
 var StaticFiles embed.FS
 
 // Handler manages all API endpoints
@@ -68,4 +68,9 @@ func (h *Handler) DebuggerCommandHandler() http.HandlerFunc {
 // TestConnectionHandler returns a handler for testing LLM connections
 func (h *Handler) TestConnectionHandler() http.HandlerFunc {
 	return h.handleTestConnection
+}
+
+// DebuggerStopHandler returns a handler for stopping the debugger
+func (h *Handler) DebuggerStopHandler() http.HandlerFunc {
+	return h.handleStopDebugger
 }
