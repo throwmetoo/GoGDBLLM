@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"bytes"
@@ -6,69 +6,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/yourusername/gogdbllm/internal/settings"
 )
 
-// ChatMessage represents a message in the chat history
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+// ChatHandler handles chat-related operations
+type ChatHandler struct {
+	settingsManager *settings.Manager
 }
 
-// ChatRequest represents a request to the chat API
-type ChatRequest struct {
-	Message string        `json:"message"`
-	History []ChatMessage `json:"history"`
-}
-
-// ChatResponse represents a response from the chat API
-type ChatResponse struct {
-	Response string `json:"response"`
-}
-
-// AnthropicMessage represents a message for Anthropic API
-type AnthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// AnthropicRequest represents a request to the Anthropic API
-type AnthropicRequest struct {
-	Model     string             `json:"model"`
-	Messages  []AnthropicMessage `json:"messages"`
-	MaxTokens int                `json:"max_tokens"`
-}
-
-// AnthropicResponse represents a response from the Anthropic API
-type AnthropicResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-}
-
-// OpenAIMessage represents a message for OpenAI API
-type OpenAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// OpenAIRequest represents a request to the OpenAI API
-type OpenAIRequest struct {
-	Model    string          `json:"model"`
-	Messages []OpenAIMessage `json:"messages"`
-}
-
-// OpenAIResponse represents a response from the OpenAI API
-type OpenAIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
+// NewChatHandler creates a new chat handler
+func NewChatHandler(settingsManager *settings.Manager) *ChatHandler {
+	return &ChatHandler{
+		settingsManager: settingsManager,
+	}
 }
 
 // HandleChat handles chat requests
-func (s *Server) HandleChat(w http.ResponseWriter, r *http.Request) {
+func (h *ChatHandler) HandleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -81,7 +36,7 @@ func (s *Server) HandleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get current settings
-	settings := s.settingsManager.GetSettings()
+	settings := h.settingsManager.GetSettings()
 
 	var response string
 	var err error
@@ -89,11 +44,11 @@ func (s *Server) HandleChat(w http.ResponseWriter, r *http.Request) {
 	// Call the appropriate API based on the provider
 	switch settings.Provider {
 	case "anthropic":
-		response, err = s.callAnthropicAPI(chatReq, settings)
+		response, err = h.callAnthropicAPI(chatReq, settings)
 	case "openai":
-		response, err = s.callOpenAIAPI(chatReq, settings)
+		response, err = h.callOpenAIAPI(chatReq, settings)
 	case "openrouter":
-		response, err = s.callOpenRouterAPI(chatReq, settings)
+		response, err = h.callOpenRouterAPI(chatReq, settings)
 	default:
 		http.Error(w, "Unsupported provider", http.StatusBadRequest)
 		return
@@ -114,7 +69,7 @@ func (s *Server) HandleChat(w http.ResponseWriter, r *http.Request) {
 }
 
 // callAnthropicAPI calls the Anthropic API
-func (s *Server) callAnthropicAPI(chatReq ChatRequest, settings Settings) (string, error) {
+func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Settings) (string, error) {
 	// Anthropic doesn't support a dedicated system message, so we'll include it in the first user message
 	systemMessage := "You are an AI assistant that helps with programming and debugging. Provide clear explanations and code examples when needed."
 
@@ -149,22 +104,20 @@ func (s *Server) callAnthropicAPI(chatReq ChatRequest, settings Settings) (strin
 	apiReq := AnthropicRequest{
 		Model:     settings.Model,
 		Messages:  messages,
-		MaxTokens: 2000,
+		MaxTokens: 4096,
 	}
 
-	// Convert to JSON
 	reqBody, err := json.Marshal(apiReq)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal request: %v", err)
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(reqBody))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 
-	// Add headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", settings.APIKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -173,38 +126,40 @@ func (s *Server) callAnthropicAPI(chatReq ChatRequest, settings Settings) (strin
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Read response
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read response: %v", err)
 	}
 
-	// Check for error
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error: %s", string(body))
+		return "", fmt.Errorf("API error (status %d): %s", resp.StatusCode, respBody)
 	}
 
 	// Parse response
 	var apiResp AnthropicResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return "", err
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %v", err)
 	}
 
-	// Extract text from response
-	if len(apiResp.Content) > 0 {
-		return apiResp.Content[0].Text, nil
+	// Extract content
+	var content string
+	for _, c := range apiResp.Content {
+		if c.Type == "text" {
+			content += c.Text
+		}
 	}
 
-	return "", fmt.Errorf("empty response from API")
+	return content, nil
 }
 
 // callOpenAIAPI calls the OpenAI API
-func (s *Server) callOpenAIAPI(chatReq ChatRequest, settings Settings) (string, error) {
-	// Convert chat history to OpenAI format
+func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Settings) (string, error) {
+	// Build the messages array
 	messages := []OpenAIMessage{
 		{
 			Role:    "system",
@@ -215,10 +170,10 @@ func (s *Server) callOpenAIAPI(chatReq ChatRequest, settings Settings) (string, 
 	// Add chat history
 	for _, msg := range chatReq.History {
 		role := msg.Role
-		if role == "assistant" {
-			role = "assistant"
-		} else {
+		if role == "user" {
 			role = "user"
+		} else {
+			role = "assistant"
 		}
 		messages = append(messages, OpenAIMessage{
 			Role:    role,
@@ -238,19 +193,17 @@ func (s *Server) callOpenAIAPI(chatReq ChatRequest, settings Settings) (string, 
 		Messages: messages,
 	}
 
-	// Convert to JSON
 	reqBody, err := json.Marshal(apiReq)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal request: %v", err)
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(reqBody))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 
-	// Add headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+settings.APIKey)
 
@@ -258,39 +211,38 @@ func (s *Server) callOpenAIAPI(chatReq ChatRequest, settings Settings) (string, 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Read response
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read response: %v", err)
 	}
 
-	// Check for error
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error: %s", string(body))
+		return "", fmt.Errorf("API error (status %d): %s", resp.StatusCode, respBody)
 	}
 
 	// Parse response
 	var apiResp OpenAIResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return "", err
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %v", err)
 	}
 
-	// Extract text from response
+	// Extract content
 	if len(apiResp.Choices) > 0 {
 		return apiResp.Choices[0].Message.Content, nil
 	}
 
-	return "", fmt.Errorf("empty response from API")
+	return "", fmt.Errorf("no content in response")
 }
 
 // callOpenRouterAPI calls the OpenRouter API
-func (s *Server) callOpenRouterAPI(chatReq ChatRequest, settings Settings) (string, error) {
-	// Convert chat history to OpenRouter format (similar to OpenAI)
-	messages := []OpenAIMessage{
+func (h *ChatHandler) callOpenRouterAPI(chatReq ChatRequest, settings settings.Settings) (string, error) {
+	// Build the messages array
+	messages := []OpenRouterMessage{
 		{
 			Role:    "system",
 			Content: "You are an AI assistant that helps with programming and debugging. Provide clear explanations and code examples when needed.",
@@ -300,94 +252,72 @@ func (s *Server) callOpenRouterAPI(chatReq ChatRequest, settings Settings) (stri
 	// Add chat history
 	for _, msg := range chatReq.History {
 		role := msg.Role
-		if role == "assistant" {
-			role = "assistant"
-		} else {
+		if role == "user" {
 			role = "user"
+		} else {
+			role = "assistant"
 		}
-		messages = append(messages, OpenAIMessage{
+		messages = append(messages, OpenRouterMessage{
 			Role:    role,
 			Content: msg.Content,
 		})
 	}
 
 	// Add the current message
-	messages = append(messages, OpenAIMessage{
+	messages = append(messages, OpenRouterMessage{
 		Role:    "user",
 		Content: chatReq.Message,
 	})
 
 	// Create request
-	apiReq := OpenAIRequest{
+	apiReq := OpenRouterRequest{
 		Model:    settings.Model,
 		Messages: messages,
 	}
 
-	// Convert to JSON
 	reqBody, err := json.Marshal(apiReq)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal request: %v", err)
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(reqBody))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 
-	// Add headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+settings.APIKey)
-	req.Header.Set("HTTP-Referer", "https://gogdbllm.app") // Replace with your actual domain
-	req.Header.Set("X-Title", "GoGDBLLM")
+	req.Header.Set("HTTP-Referer", "https://github.com/yourusername/gogdbllm")
 
 	// Send request
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Read response
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read response: %v", err)
 	}
 
-	// Check for error
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error: %s", string(body))
+		return "", fmt.Errorf("API error (status %d): %s", resp.StatusCode, respBody)
 	}
 
 	// Parse response
-	var apiResp OpenAIResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return "", err
+	var apiResp OpenRouterResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %v", err)
 	}
 
-	// Extract text from response
+	// Extract content
 	if len(apiResp.Choices) > 0 {
 		return apiResp.Choices[0].Message.Content, nil
 	}
 
-	return "", fmt.Errorf("empty response from API")
-}
-
-// ProcessChatRequest processes a chat request and returns a response
-func (s *Server) ProcessChatRequest(chatReq ChatRequest) (string, error) {
-	// Get settings
-	settings := s.settingsManager.GetSettings()
-
-	// Call the appropriate API based on the provider
-	switch settings.Provider {
-	case "openai":
-		return s.callOpenAIAPI(chatReq, settings)
-	case "anthropic":
-		return s.callAnthropicAPI(chatReq, settings)
-	case "openrouter":
-		return s.callOpenRouterAPI(chatReq, settings)
-	default:
-		return "", fmt.Errorf("unsupported provider: %s", settings.Provider)
-	}
+	return "", fmt.Errorf("no content in response")
 }

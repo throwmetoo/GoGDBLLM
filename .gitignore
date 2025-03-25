@@ -1,10 +1,10 @@
 # Go build artifacts
-/bin/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+/gogdbllm
 
 # Go test and coverage files
 *.test
@@ -26,16 +26,14 @@ go.work
 
 # Application specific
 .gogdbllm_settings.json
-*.pem
-*.key
-
-# Uploaded files and temp directories
-/uploads/
-/tmp/
+/uploads/*
+!/uploads/.gitkeep
 
 # API keys and sensitive files
+*.pem
+*.key
 **/file.txt
 **/*api*.txt
 **/*.env
 .env
-.env.local
+.env.local 

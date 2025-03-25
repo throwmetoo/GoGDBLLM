@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoGDBLLM - GDB with AI Assistance</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <h1>GoGDBLLM</h1>
+            <nav class="nav">
+                <button id="uploadTabBtn" class="nav-btn active" data-section="uploadSection">Upload</button>
+                <button id="terminalTabBtn" class="nav-btn" data-section="terminalSection">Terminal</button>
+                <button id="settingsTabBtn" class="nav-btn" data-section="settingsSection">Settings</button>
+            </nav>
+        </header>
+
+        <main class="main-content">
+            <!-- Upload Section -->
+            <section id="uploadSection" class="section active">
+                <h2>Upload Executable</h2>
+                <div id="dropZone" class="drop-zone">
+                    <p>Drag and drop an executable file here or click to browse</p>
+                    <input type="file" id="fileInput" class="file-input" />
+                </div>
+                <button id="uploadBtn" class="btn primary-btn" disabled>Upload</button>
+                <div id="uploadStatus" class="status-message"></div>
+            </section>
+
+            <!-- Terminal Section -->
+            <section id="terminalSection" class="section">
+                <div id="terminal" class="terminal"></div>
+                <div id="commandWrapper" class="command-wrapper">
+                    <span id="commandPrompt" class="command-prompt">(gdb)</span>
+                    <input type="text" id="commandInput" class="command-input" autocomplete="off" />
+                    <button id="executeBtn" class="btn execute-btn">Execute</button>
+                </div>
+            </section>
+
+            <!-- Settings Section -->
+            <section id="settingsSection" class="section">
+                <h2>Settings</h2>
+                <form id="settingsForm" class="settings-form">
+                    <div class="form-group">
+                        <label for="providerSelect">Provider</label>
+                        <select id="providerSelect" class="select-input">
+                            <option value="anthropic">Anthropic</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="openrouter">OpenRouter</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="modelSelect">Model</label>
+                        <select id="modelSelect" class="select-input"></select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="apiKeyInput">API Key</label>
+                        <input type="password" id="apiKeyInput" class="text-input" placeholder="Enter your API key" />
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="button" id="testConnectionBtn" class="btn secondary-btn">Test Connection</button>
+                        <button type="button" id="saveSettingsBtn" class="btn primary-btn">Save Settings</button>
+                    </div>
+                    
+                    <div id="connectionStatus" class="status-message"></div>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <!-- Chat Panel -->
+    <div id="chatPanel" class="chat-panel">
+        <div class="chat-header">
+            <h3>AI Assistant</h3>
+            <button id="closeChatBtn" class="close-btn">&times;</button>
+        </div>
+        
+        <div id="chatMessages" class="chat-messages"></div>
+        
+        <div id="terminalContext" class="terminal-context">
+            <h4>Terminal Output</h4>
+            <pre id="terminalOutput" class="terminal-output"></pre>
+        </div>
+        
+        <div class="chat-input-wrapper">
+            <textarea id="chatInput" class="chat-input" placeholder="Ask a question about your debugging session..."></textarea>
+            <button id="sendChatBtn" class="btn send-btn">Send</button>
+        </div>
+        
+        <div class="chat-info">
+            <span id="currentModel" class="model-info"></span>
+        </div>
+    </div>
+    
+    <button id="openChatBtn" class="open-chat-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+    </button>
+
+    <!-- Notification -->
+    <div id="notification" class="notification"></div>
+
+    <!-- Load JavaScript modules in the correct order -->
+    <script src="/static/js/utils.js"></script>
+    <script src="/static/js/navigation.js"></script>
+    <script src="/static/js/terminal.js"></script>
+    <script src="/static/js/upload.js"></script>
+    <script src="/static/js/settings.js"></script>
+    <script src="/static/js/chat.js"></script>
+    <!-- Main application script should be loaded last -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html> 
