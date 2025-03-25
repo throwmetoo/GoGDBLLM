@@ -15,9 +15,89 @@ function initChatPanel() {
     
     // Chat state
     let chatHistory = [];
+    let savedPanelWidth = localStorage.getItem('chatPanelWidth') || '400px';
+    
+    // Set initial width from saved value
+    chatPanel.style.width = savedPanelWidth;
+    
+    // Create and add resize handle
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'chat-resize-handle';
+    chatPanel.appendChild(resizeHandle);
+    
+    // Resize functionality
+    let isResizing = false;
+    let startX, startWidth;
+    
+    // Mouse events for resizing
+    resizeHandle.addEventListener('mousedown', startResizing);
+    
+    // Touch events for mobile support
+    resizeHandle.addEventListener('touchstart', (e) => {
+        const touch = e.touches[0];
+        startResizing(touch);
+    });
+    
+    function startResizing(e) {
+        isResizing = true;
+        startX = e.clientX;
+        startWidth = parseInt(document.defaultView.getComputedStyle(chatPanel).width, 10);
+        resizeHandle.classList.add('active');
+        
+        // Add event listeners based on input type
+        if (e.type === 'touchstart') {
+            document.addEventListener('touchmove', handleTouchMove);
+            document.addEventListener('touchend', handleTouchEnd);
+        } else {
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+        }
+        
+        // Prevent default to avoid selection and scrolling
+        e.preventDefault();
+    }
+    
+    function handleMouseMove(e) {
+        if (!isResizing) return;
+        const width = startWidth - (e.clientX - startX);
+        chatPanel.style.width = `${Math.max(280, Math.min(window.innerWidth * 0.8, width))}px`;
+    }
+    
+    function handleTouchMove(e) {
+        if (!isResizing || !e.touches[0]) return;
+        const touch = e.touches[0];
+        const width = startWidth - (touch.clientX - startX);
+        chatPanel.style.width = `${Math.max(280, Math.min(window.innerWidth * 0.8, width))}px`;
+        e.preventDefault();
+    }
+    
+    function handleMouseUp() {
+        endResizing();
+    }
+    
+    function handleTouchEnd() {
+        endResizing();
+    }
+    
+    function endResizing() {
+        isResizing = false;
+        resizeHandle.classList.remove('active');
+        
+        // Remove all event listeners
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.removeEventListener('touchmove', handleTouchMove);
+        document.removeEventListener('touchend', handleTouchEnd);
+        
+        // Save current width
+        localStorage.setItem('chatPanelWidth', chatPanel.style.width);
+        savedPanelWidth = chatPanel.style.width;
+    }
     
     // Open/close chat panel
     openChatBtn.addEventListener('click', () => {
+        // Restore saved width before opening
+        chatPanel.style.width = savedPanelWidth;
         chatPanel.classList.add('open');
         
         // Update terminal context
@@ -28,6 +108,11 @@ function initChatPanel() {
     });
     
     closeChatBtn.addEventListener('click', () => {
+        // Save width before closing
+        if (chatPanel.style.width) {
+            savedPanelWidth = chatPanel.style.width;
+            localStorage.setItem('chatPanelWidth', savedPanelWidth);
+        }
         chatPanel.classList.remove('open');
     });
     
