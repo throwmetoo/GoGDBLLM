@@ -118,34 +118,57 @@ function initChatPanel() {
     
     // Send chat message
     async function sendMessage() {
-        const message = chatInput.value.trim();
-        if (!message) return;
-        
-        // Clear input
+        const userQuery = chatInput.value.trim(); // Get user query first
+        if (!userQuery) return;
+
+        // Clear input AFTER getting the value
         chatInput.value = '';
-        
-        // Add message to UI
-        addMessageToUI('user', message);
-        
-        // Get terminal context
-        const context = terminal.textContent;
-        
-        // Prepare full message with context
-        const fullMessage = `Here's my question about the debugging session:\n\n${message}\n\nHere's the current terminal output:\n\`\`\`\n${context}\n\`\`\``;
-        
+
+        // Add user's query to UI immediately
+        addMessageToUI('user', userQuery);
+
+        // Determine the context: selected text or full terminal output
+        const selection = window.getSelection();
+        const selectedText = selection.toString().trim();
+        let context = '';
+        let contextDescription = '';
+
+        // Check if selection exists and is within the terminal element
+        if (selectedText && terminal.contains(selection.anchorNode) && terminal.contains(selection.focusNode)) {
+            context = selectedText;
+            contextDescription = "Here's the selected terminal output related to my question:";
+        } else {
+            // Fallback to full terminal content if no valid selection
+            context = terminal.textContent; // Use the actual terminal element content
+            contextDescription = "Here's the current terminal output for context:";
+        }
+
+        // Prepare full message with context for the LLM
+        // Ensure context isn't excessively long (optional, add if needed)
+        // const MAX_CONTEXT_LENGTH = 4000;
+        // if (context.length > MAX_CONTEXT_LENGTH) {
+        //     context = `... (trimmed) ...\\n${context.slice(-MAX_CONTEXT_LENGTH)}`;
+        //     contextDescription += " (trimmed due to length)";
+        // }
+
+        const fullMessage = `Here's my question about the debugging session:\n\n${userQuery}\n\n${contextDescription}\n\`\`\`\n${context}\n\`\`\``;
+
         try {
             // Show thinking indicator
             const thinkingMsg = addThinkingMessage();
-            
-            // Create payload
+
+            // Create payload - history includes the user message we already added to UI
+             chatHistory.push({ role: 'user', content: userQuery }); // Add user query to history *before* sending
+
             const payload = {
-                message: fullMessage,
-                history: chatHistory.map(msg => ({
+                message: fullMessage, // This now contains query + context (selected or full)
+                history: chatHistory.map(msg => ({ // Send history *excluding* the current user query already in fullMessage
                     role: msg.role,
                     content: msg.content
-                }))
+                })).slice(0, -1) // Remove the last element which is the current user query
             };
-            
+
+
             // Send to server
             const response = await fetch('/api/chat', {
                 method: 'POST',
@@ -154,41 +177,50 @@ function initChatPanel() {
                 },
                 body: JSON.stringify(payload)
             });
-            
+
             // Handle errors
             if (!response.ok) {
-                throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                 const errorText = await response.text(); // Read error response body
+                 throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
             }
-            
+
             // Parse response
             const data = await response.json();
-            
+
             // Remove thinking message
-            chatMessages.removeChild(thinkingMsg);
-            
+            if (thinkingMsg && chatMessages.contains(thinkingMsg)) {
+                chatMessages.removeChild(thinkingMsg);
+            }
+
+
             // Add response to UI
             addMessageToUI('assistant', data.response);
-            
-            // Add to history (use original message, not the full context one)
-            chatHistory.push({ role: 'user', content: message });
+
+            // Add assistant response to history
             chatHistory.push({ role: 'assistant', content: data.response });
-            
-            // Limit history length
-            if (chatHistory.length > 10) {
-                chatHistory = chatHistory.slice(-10);
-            }
+
+            // Limit history length (apply after adding both user and assistant messages)
+             const MAX_HISTORY_PAIRS = 10; // Store 10 pairs (user + assistant)
+             if (chatHistory.length > MAX_HISTORY_PAIRS * 2) {
+                 chatHistory = chatHistory.slice(-(MAX_HISTORY_PAIRS * 2));
+             }
         } catch (error) {
             console.error('Chat error:', error);
-            
+
             // Remove thinking message if it exists
             const thinkingMsg = document.querySelector('.message.thinking');
             if (thinkingMsg) {
                 chatMessages.removeChild(thinkingMsg);
             }
-            
-            // Show error message
-            addMessageToUI('assistant', `Error: ${error.message}`);
-            AppUtils.showNotification('Failed to send message', 'error');
+
+            // Show error message in chat
+             addMessageToUI('assistant', `Sorry, I encountered an error: ${error.message}. Please check the console for details.`);
+             AppUtils.showNotification('Failed to get AI response', 'error');
+
+             // Remove the user message that failed from history
+             if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') {
+                chatHistory.pop();
+             }
         }
     }
     
