@@ -55,7 +55,7 @@ function initUploadSection() {
         
         // Create form data
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        formData.append('executable', selectedFile);
         
         // Update UI during upload
         uploadBtn.disabled = true;
