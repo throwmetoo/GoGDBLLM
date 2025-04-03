@@ -503,4 +503,88 @@ body {
         width: 100%;
         justify-content: space-between;
     }
-} 
+}
+
+/* Custom Context Menu Bubble */
+.custom-context-menu {
+    position: absolute; /* Already set in JS, but good practice */
+    background-color: rgba(50, 50, 50, 0.9); /* Semi-transparent dark background */
+    color: #eee; /* Light text color */
+    border-radius: 8px; /* Rounded corners */
+    padding: 8px 12px;
+    font-size: 0.9em;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    z-index: 1000; /* Ensure it's above other elements */
+    cursor: pointer;
+    white-space: nowrap; /* Prevent wrapping */
+    transition: opacity 0.1s ease-in-out; /* Fade effect (optional) */
+}
+
+.custom-context-menu:hover {
+    background-color: rgba(70, 70, 70, 0.95); /* Slightly lighter on hover */
+}
+
+.context-menu-item {
+    /* No specific styles needed if menu has only one item, */
+    /* but you could add padding/margin here if needed */
+}
+
+/* Style for the context preview area */
+#contextPreviewArea {
+    display: none; /* Hidden by default */
+    background-color: var(--secondary-bg-color, #f0f0f0); /* Use app's secondary background */
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 4px;
+    padding: 5px 8px;
+    margin-bottom: 5px; /* Space below preview */
+    font-size: 0.85em;
+    display: flex; /* Use flex for alignment */
+    align-items: center;
+    justify-content: space-between; /* Push clear button to the right */
+    gap: 8px; /* Space between elements */
+}
+
+#contextPreviewArea .preview-label {
+    font-weight: bold;
+    color: var(--text-secondary-color, #555);
+}
+
+#contextPreviewArea .preview-text {
+    font-family: var(--mono-font-family, monospace); /* Use app's monospace font */
+    background-color: var(--code-bg-color, #e8e8e8); /* Use app's code background */
+    padding: 2px 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-grow: 1; /* Allow text to take available space */
+    max-width: 70%; /* Prevent it from taking too much space */
+}
+
+#contextPreviewArea .clear-context-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary-color, #777);
+    font-size: 1.2em;
+    cursor: pointer;
+    padding: 0 3px;
+    line-height: 1;
+}
+#contextPreviewArea .clear-context-btn:hover {
+    color: var(--text-color, #333);
+}
+
+/* Add styles for dark mode if your app supports it */
+body.dark-mode .custom-context-menu {
+    background-color: rgba(230, 230, 230, 0.9);
+    color: #222;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+}
+body.dark-mode .custom-context-menu:hover {
+    background-color: rgba(255, 255, 255, 0.95);
+}
+body.dark-mode #contextPreviewArea {
+     background-color: var(--secondary-bg-color-dark, #3a3a3a);
+     border: 1px solid var(--border-color-dark, #555);
+}
+/* ... other dark mode styles ... */ 
