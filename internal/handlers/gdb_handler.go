@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/yourusername/gogdbllm/internal/gdb"
+	"github.com/yourusername/gogdbllm/internal/utils"
 	"github.com/yourusername/gogdbllm/internal/websocket"
 )
 
@@ -62,12 +63,17 @@ func (h *GDBHandler) HandleStartGDB(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		outputChan := h.gdbService.GetOutputChannel()
 		for outputBytes := range outputChan {
-			outputString := string(outputBytes)
+			rawOutputString := string(outputBytes)
+			// Sanitize the string for logging
+			sanitizedOutputString := utils.StripAnsiAndControlChars(rawOutputString)
+
 			// Get current logger inside goroutine (it might change)
 			currentLogger := h.loggerHolder.Get()
 			if currentLogger != nil {
-				currentLogger.LogTerminalOutput(outputString)
+				// Log the sanitized string
+				currentLogger.LogTerminalOutput(sanitizedOutputString)
 			}
+			// Broadcast the original bytes (which might contain ANSI codes for frontend)
 			h.hub.Broadcast(outputBytes)
 		}
 		log.Println("GDB output channel closed for:", filePath)

@@ -36,4 +36,11 @@ go.work
 **/*api*.txt
 **/*.env
 .env
-.env.local 
+.env.local
+.envrc
+
+# Logs
+logs/
+*.log
+
+# Env files 
