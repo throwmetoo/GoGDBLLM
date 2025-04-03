@@ -587,4 +587,134 @@ body.dark-mode #contextPreviewArea {
      background-color: var(--secondary-bg-color-dark, #3a3a3a);
      border: 1px solid var(--border-color-dark, #555);
 }
-/* ... other dark mode styles ... */ 
+/* ... other dark mode styles ... */
+
+/* Styles for Sent Context Display */
+.context-wrapper { /* This class is no longer used in JS, can be removed if desired */
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+/* Style the toggle */
+.message .context-toggle { /* Target using .message */
+    font-size: 0.8em;
+    /* color: var(--text-secondary-color, #555); // Inherit color instead */
+    color: inherit; 
+    opacity: 0.7;
+    cursor: pointer;
+    user-select: none; /* Prevent text selection */
+    display: block; /* Make it block level to appear below text */
+    margin-top: 5px; /* Add space above the toggle */
+    padding: 2px 4px;
+    border-radius: 3px;
+    /* background-color: var(--button-bg-color, #f0f0f0); // Don't set background, let it blend */
+    /* border: 1px solid var(--border-color, #ccc); // Remove border */
+    text-decoration: underline;
+    text-decoration-style: dashed;
+}
+
+.message .context-toggle:hover {
+    /* color: var(--text-color, #111); */
+    opacity: 1;
+    /* background-color: var(--button-hover-bg-color, #e0e0e0); */
+}
+
+/* Style the details container */
+.message .context-details { /* Target using .message */
+    margin-top: 5px;
+    padding: 8px;
+    /* background-color: var(--secondary-bg-color, #f9f9f9); // Inherit background slightly modified */
+    background-color: rgba(0, 0, 0, 0.05); /* Slightly darker overlay */
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    font-size: 0.9em;
+    max-height: 150px; /* Limit height */
+    overflow-y: auto;  /* Add scroll for overflow */
+    color: inherit; /* Inherit text color from parent (.message) */
+    width: 100%; /* Ensure it takes full width available inside the bubble */
+}
+
+.message .context-item {
+    margin-bottom: 5px;
+    padding-bottom: 5px;
+    border-bottom: 1px dashed rgba(0, 0, 0, 0.1); /* Use subtle border */
+    color: inherit; /* Inherit text color */
+}
+
+.message .context-item:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.message .context-item strong {
+    display: block;
+    margin-bottom: 3px;
+    color: inherit; /* Inherit text color */
+    opacity: 0.8;
+}
+
+/* Style the code block inside context */
+.message .context-item pre {
+    margin: 5px 0 0 0;
+    padding: 5px;
+    /* background-color: var(--code-bg-color, #e8e8e8); // Use subtle background */
+    background-color: rgba(0, 0, 0, 0.08);
+    border-radius: 3px;
+    font-size: 0.85em;
+    max-height: 80px;
+    overflow: auto;
+    color: inherit; /* Inherit text color */
+}
+
+.message .context-item code {
+    font-family: var(--font-mono, monospace);
+    white-space: pre-wrap; /* Wrap long lines */
+    word-break: break-all; /* Break long words/tokens */
+    color: inherit; /* Inherit text color */
+}
+
+/* Dark mode specific styles for context */
+body.dark-mode .message .context-toggle {
+    /* Inherits color, just adjust opacity/decoration if needed */
+    opacity: 0.6;
+}
+body.dark-mode .message .context-toggle:hover {
+    opacity: 0.9;
+}
+
+body.dark-mode .message .context-details {
+    background-color: rgba(255, 255, 255, 0.05); /* Slightly lighter overlay */
+    border-color: rgba(255, 255, 255, 0.1);
+    /* color: inherit; // Already inherited */
+}
+
+body.dark-mode .message .context-item {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+    /* color: inherit; */
+}
+
+body.dark-mode .message .context-item strong {
+    /* color: inherit; */
+    opacity: 0.7;
+}
+
+body.dark-mode .message .context-item pre {
+    background-color: rgba(255, 255, 255, 0.08);
+    /* color: inherit; */
+}
+
+/* Remove the old layout attempt styles */
+/*
+.chat-message .context-toggle {
+    margin-left: 8px; 
+    vertical-align: middle; 
+}
+.chat-message .context-details {}
+*/
+
+/* Ensure the dark mode preview text is also readable */
+body.dark-mode #contextPreviewArea .preview-text {
+    background-color: var(--code-bg-color-dark, #3a3a3a);
+    color: var(--text-color-dark, #eee);
+} 

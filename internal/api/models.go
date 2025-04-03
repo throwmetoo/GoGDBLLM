@@ -2,20 +2,31 @@ package api
 
 // ChatMessage represents a message in the chat history
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role        string        `json:"role"`
+	Content     string        `json:"content"`
+	SentContext []ContextItem `json:"sent_context,omitempty"`
+}
+
+// ContextItem represents a piece of context sent to the LLM
+type ContextItem struct {
+	Type        string `json:"type"`              // e.g., "file", "code_snippet", "command_output", "message_history"
+	Description string `json:"description"`       // e.g., file path, command executed, "Previous messages"
+	Content     string `json:"content,omitempty"` // The actual content snippet (optional for brevity)
 }
 
 // ChatRequest represents a request to the chat API
 type ChatRequest struct {
-	Message string        `json:"message"`
-	History []ChatMessage `json:"history"`
+	Message     string        `json:"message"`
+	History     []ChatMessage `json:"history"`
+	SentContext []ContextItem `json:"sentContext,omitempty"`
 }
 
 // ChatResponse represents a response from the chat API
 type ChatResponse struct {
 	Response string `json:"response"`
 }
+
+// --- LLM Provider Specific Structs ---
 
 // AnthropicMessage represents a message for Anthropic API
 type AnthropicMessage struct {

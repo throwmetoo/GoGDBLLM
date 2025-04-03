@@ -73,6 +73,21 @@ func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Se
 	// Anthropic doesn't support a dedicated system message, so we'll include it in the first user message
 	systemMessage := "You are an AI assistant that helps with programming and debugging. Provide clear explanations and code examples when needed."
 
+	// --- Context Injection Start ---
+	currentUserMessageContent := chatReq.Message
+	if len(chatReq.SentContext) > 0 {
+		contextPrefix := "\n\n--- Provided Context ---\n"
+		for _, item := range chatReq.SentContext {
+			contextPrefix += fmt.Sprintf("Type: %s\nDescription: %s\n", item.Type, item.Description)
+			if item.Content != "" {
+				contextPrefix += fmt.Sprintf("Content:\n```\n%s\n```\n", item.Content)
+			}
+			contextPrefix += "---\n"
+		}
+		currentUserMessageContent = contextPrefix + currentUserMessageContent
+	}
+	// --- Context Injection End ---
+
 	// Build the messages array
 	messages := []AnthropicMessage{}
 
@@ -94,10 +109,10 @@ func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Se
 		})
 	}
 
-	// Add the current message
+	// Add the current message (with context potentially prepended)
 	messages = append(messages, AnthropicMessage{
 		Role:    "user",
-		Content: chatReq.Message,
+		Content: currentUserMessageContent,
 	})
 
 	// Create request
@@ -159,6 +174,21 @@ func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Se
 
 // callOpenAIAPI calls the OpenAI API
 func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Settings) (string, error) {
+	// --- Context Injection Start ---
+	currentUserMessageContent := chatReq.Message
+	if len(chatReq.SentContext) > 0 {
+		contextPrefix := "\n\n--- Provided Context ---\n"
+		for _, item := range chatReq.SentContext {
+			contextPrefix += fmt.Sprintf("Type: %s\nDescription: %s\n", item.Type, item.Description)
+			if item.Content != "" {
+				contextPrefix += fmt.Sprintf("Content:\n```\n%s\n```\n", item.Content)
+			}
+			contextPrefix += "---\n"
+		}
+		currentUserMessageContent = contextPrefix + currentUserMessageContent
+	}
+	// --- Context Injection End ---
+
 	// Build the messages array
 	messages := []OpenAIMessage{
 		{
@@ -181,10 +211,10 @@ func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Setti
 		})
 	}
 
-	// Add the current message
+	// Add the current message (with context potentially prepended)
 	messages = append(messages, OpenAIMessage{
 		Role:    "user",
-		Content: chatReq.Message,
+		Content: currentUserMessageContent,
 	})
 
 	// Create request
@@ -241,6 +271,21 @@ func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Setti
 
 // callOpenRouterAPI calls the OpenRouter API
 func (h *ChatHandler) callOpenRouterAPI(chatReq ChatRequest, settings settings.Settings) (string, error) {
+	// --- Context Injection Start ---
+	currentUserMessageContent := chatReq.Message
+	if len(chatReq.SentContext) > 0 {
+		contextPrefix := "\n\n--- Provided Context ---\n"
+		for _, item := range chatReq.SentContext {
+			contextPrefix += fmt.Sprintf("Type: %s\nDescription: %s\n", item.Type, item.Description)
+			if item.Content != "" {
+				contextPrefix += fmt.Sprintf("Content:\n```\n%s\n```\n", item.Content)
+			}
+			contextPrefix += "---\n"
+		}
+		currentUserMessageContent = contextPrefix + currentUserMessageContent
+	}
+	// --- Context Injection End ---
+
 	// Build the messages array
 	messages := []OpenRouterMessage{
 		{
@@ -263,10 +308,10 @@ func (h *ChatHandler) callOpenRouterAPI(chatReq ChatRequest, settings settings.S
 		})
 	}
 
-	// Add the current message
+	// Add the current message (with context potentially prepended)
 	messages = append(messages, OpenRouterMessage{
 		Role:    "user",
-		Content: chatReq.Message,
+		Content: currentUserMessageContent,
 	})
 
 	// Create request

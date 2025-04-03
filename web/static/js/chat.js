@@ -242,125 +242,130 @@ function initChatPanel() {
         const userQuery = chatInput.value.trim();
         if (!userQuery) return;
 
+        // Create the user message object *before* clearing input and context
+        const userMessage = {
+            role: 'user',
+            content: userQuery,
+            // Include stagedContext if it exists
+            sentContext: stagedContext ? [{
+                type: 'selection',
+                description: 'Selected Text Snippet',
+                content: stagedContext
+            }] : []
+        };
+
         chatInput.value = '';
-        addMessageToUI('user', userQuery);
+        addMessageToUI(userMessage.role, userMessage.content, userMessage.sentContext);
+        clearStagedContext(); // Clear context after sending
 
-        let context = '';
-        let contextDescription = '';
+        addThinkingMessage();
 
-        // Use staged context if available
-        if (stagedContext) {
-            context = stagedContext;
-            contextDescription = "Here's the selected terminal output related to my question:";
-        } else {
-            // Fallback to full terminal content
-            context = terminal.textContent || "";
-            contextDescription = "Here's the current terminal output for context:";
-        }
-
-        // Prepare full message
-        const MAX_CONTEXT_LENGTH = 4000;
-        if (context.length > MAX_CONTEXT_LENGTH) {
-            context = `... (trimmed) ...\n${context.slice(-MAX_CONTEXT_LENGTH)}`;
-            contextDescription += " (trimmed due to length)";
-        }
-        const fullMessage = `Here's my question about the debugging session:\n\n${userQuery}\n\n${contextDescription}\n\`\`\`\n${context.trim()}\n\`\`\``;
-
-        // Add user query to local history *before* sending
-        chatHistory.push({ role: 'user', content: userQuery });
-
-        const thinkingMsg = addThinkingMessage();
+        // Prepare history, excluding the just-added user message's context for the API call
+        const historyForAPI = chatHistory.map(msg => ({
+            role: msg.role,
+            content: msg.content // Only send role and content
+        }));
 
         try {
-            const historyForPayload = chatHistory.slice(0, -1).map(msg => ({ role: msg.role, content: msg.content }));
-            const payload = { message: fullMessage, history: historyForPayload };
-
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({
+                    message: userQuery, // Send the raw user message text
+                    history: historyForAPI,
+                    // Include the sentContext for the current message if it exists
+                    // Backend needs to be updated to handle this field.
+                    sentContext: userMessage.sentContext && userMessage.sentContext.length > 0 ? userMessage.sentContext : undefined
+                }),
             });
 
-            if (thinkingMsg && chatMessages.contains(thinkingMsg)) {
-                chatMessages.removeChild(thinkingMsg);
-            }
+            document.getElementById('thinkingMessage')?.remove();
 
             if (!response.ok) {
-                let errorDetails = '';
-                try { errorDetails = await response.text(); } catch (e) { }
-                throw new Error(`API Error: ${response.status} ${response.statusText}. ${errorDetails}`);
+                const errorText = await response.text();
+                throw new Error(`HTTP error! status: ${response.status}, ${errorText}`);
             }
 
             const data = await response.json();
-            if (!data || !data.response) {
-                throw new Error("Received empty or invalid response from server.");
-            }
 
-            addMessageToUI('assistant', data.response);
-            chatHistory.push({ role: 'assistant', content: data.response });
+            const assistantMessage = {
+                role: 'assistant',
+                content: data.response,
+                // Assistant messages won't have 'sentContext'
+            };
+            addMessageToUI(assistantMessage.role, assistantMessage.content);
 
-            // --- Debugging Log --- 
-            console.log("Attempting to update Selected Context display.");
-            console.log("Context variable:", context ? `"${context.trim()}"` : '(empty or null)');
-            console.log("terminalOutput element:", terminalOutput);
-            // --- End Debugging Log --- 
-            
-            // Update the "Selected Context" display area with what was actually sent
-            if (terminalOutput) {
-                console.log("Setting terminalOutput.textContent"); // Log entry into block
-                terminalOutput.textContent = context.trim(); // Use the context variable
-            } else {
-                 console.warn("Could not find terminalOutput element to update!");
-            }
-            
-            // Clear staged context ONLY on successful send
-            clearStagedContext();
-
-            const MAX_HISTORY_PAIRS = 10;
-            if (chatHistory.length > MAX_HISTORY_PAIRS * 2) {
-                chatHistory = chatHistory.slice(-(MAX_HISTORY_PAIRS * 2));
-            }
+            // Add both user and assistant messages to history *after* successful API call
+            // Store the user message *with* its context for UI display
+            chatHistory.push(userMessage);
+            chatHistory.push(assistantMessage); // Assistant message has no sentContext
 
         } catch (error) {
-            console.error('Chat error:', error);
-            if (thinkingMsg && chatMessages.contains(thinkingMsg)) {
-                chatMessages.removeChild(thinkingMsg);
-            }
-            addMessageToUI('assistant', `Sorry, I encountered an error: ${error.message || 'Unable to get response.'}`);
-
-            // Don't clear context on error, user might want to retry
-            // clearStagedContext();
-
-            // Remove the user message that led to the error from local history
-            if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') {
-                chatHistory.pop();
-            }
+            console.error('Error sending message:', error);
+            addMessageToUI('error', `Error: ${error.message}`);
+            document.getElementById('thinkingMessage')?.remove();
         }
     }
     
     // Add message to UI
-    function addMessageToUI(role, content) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${role}`;
-        
-        // Format content if from assistant
-        if (role === 'assistant') {
-            const formattedContent = AppUtils.formatMarkdown(content);
-            messageDiv.innerHTML = formattedContent;
-            messageDiv.classList.add('markdown');
-        } else {
-            messageDiv.textContent = content;
+    function addMessageToUI(role, content, sentContext = null) {
+        const messageElement = document.createElement('div');
+        // Ensure both 'message' and 'chat-message' classes are added for style compatibility
+        messageElement.classList.add('message', 'chat-message', role);
+
+        const textElement = document.createElement('div');
+        textElement.classList.add('message-content');
+        // Basic escaping, replace with Markdown rendering if available
+        const escapedContent = content.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        textElement.innerHTML = escapedContent;
+        messageElement.appendChild(textElement);
+
+        // --- Context Display Logic ---
+        if (role === 'user' && sentContext && sentContext.length > 0) {
+            const toggle = document.createElement('span');
+            toggle.classList.add('context-toggle');
+            toggle.innerHTML = '&#x25BC; Context'; // Down arrow
+            toggle.title = 'Show/Hide Sent Context';
+            // Append toggle *after* textElement but *inside* messageElement
+            messageElement.appendChild(toggle);
+
+            const contextDetails = document.createElement('div');
+            contextDetails.classList.add('context-details');
+            contextDetails.style.display = 'none'; // Initially hidden
+
+            sentContext.forEach(item => {
+                const itemElement = document.createElement('div');
+                itemElement.classList.add('context-item');
+                itemElement.innerHTML = `
+                    <strong>${item.type.replace(/</g, "&lt;").replace(/>/g, "&gt;")}:</strong> ${item.description.replace(/</g, "&lt;").replace(/>/g, "&gt;")}
+                    ${item.content ? `<pre><code>${item.content.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code></pre>` : ''}
+                `; // Added escaping for type
+                contextDetails.appendChild(itemElement);
+            });
+
+            // Append details *after* toggle but *inside* messageElement
+            messageElement.appendChild(contextDetails);
+
+            // Toggle functionality
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent potential clicks on the message bubble itself
+                const isHidden = contextDetails.style.display === 'none';
+                contextDetails.style.display = isHidden ? 'block' : 'none';
+                toggle.innerHTML = isHidden ? '&#x25B2; Context' : '&#x25BC; Context'; // Up/Down arrow
+            });
         }
-        
-        // Add to messages
-        chatMessages.appendChild(messageDiv);
-        
-        // Scroll to bottom
+        // --- End Context Display Logic ---
+
+        chatMessages.appendChild(messageElement);
         chatMessages.scrollTop = chatMessages.scrollHeight;
-        
-        return messageDiv;
+
+        // Add message to internal history if it's not an error/thinking message
+        if (role !== 'error' && role !== 'thinking') {
+            // Note: We push to chatHistory in sendMessage *after* successful API call now
+            // to ensure we store the user message with its context correctly.
+        }
     }
     
     // Add thinking message
