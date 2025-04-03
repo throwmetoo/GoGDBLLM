@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/yourusername/gogdbllm/internal/settings"
@@ -122,6 +123,15 @@ func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Se
 		MaxTokens: 4096,
 	}
 
+	// --- Logging Start ---
+	log.Printf("[Anthropic Request] Model: %s", apiReq.Model)
+	log.Printf("[Anthropic Request] Sending User Message (with context): %s", currentUserMessageContent)
+	// Optionally log full history if needed for deeper debugging:
+	// for i, msg := range apiReq.Messages {
+	// 	log.Printf("[Anthropic Request] Message %d (%s): %s", i, msg.Role, msg.Content)
+	// }
+	// --- Logging End ---
+
 	reqBody, err := json.Marshal(apiReq)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %v", err)
@@ -168,6 +178,10 @@ func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Se
 			content += c.Text
 		}
 	}
+
+	// --- Logging Start ---
+	log.Printf("[Anthropic Response] Received Content: %s", content)
+	// --- Logging End ---
 
 	return content, nil
 }
@@ -223,6 +237,15 @@ func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Setti
 		Messages: messages,
 	}
 
+	// --- Logging Start ---
+	log.Printf("[OpenAI Request] Model: %s", apiReq.Model)
+	log.Printf("[OpenAI Request] Sending User Message (with context): %s", currentUserMessageContent)
+	// Optionally log full history:
+	// for i, msg := range apiReq.Messages {
+	// 	log.Printf("[OpenAI Request] Message %d (%s): %s", i, msg.Role, msg.Content)
+	// }
+	// --- Logging End ---
+
 	reqBody, err := json.Marshal(apiReq)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %v", err)
@@ -263,7 +286,11 @@ func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Setti
 
 	// Extract content
 	if len(apiResp.Choices) > 0 {
-		return apiResp.Choices[0].Message.Content, nil
+		responseContent := apiResp.Choices[0].Message.Content
+		// --- Logging Start ---
+		log.Printf("[OpenAI Response] Received Content: %s", responseContent)
+		// --- Logging End ---
+		return responseContent, nil
 	}
 
 	return "", fmt.Errorf("no content in response")
@@ -320,6 +347,15 @@ func (h *ChatHandler) callOpenRouterAPI(chatReq ChatRequest, settings settings.S
 		Messages: messages,
 	}
 
+	// --- Logging Start ---
+	log.Printf("[OpenRouter Request] Model: %s", apiReq.Model)
+	log.Printf("[OpenRouter Request] Sending User Message (with context): %s", currentUserMessageContent)
+	// Optionally log full history:
+	// for i, msg := range apiReq.Messages {
+	// 	log.Printf("[OpenRouter Request] Message %d (%s): %s", i, msg.Role, msg.Content)
+	// }
+	// --- Logging End ---
+
 	reqBody, err := json.Marshal(apiReq)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %v", err)
@@ -361,7 +397,11 @@ func (h *ChatHandler) callOpenRouterAPI(chatReq ChatRequest, settings settings.S
 
 	// Extract content
 	if len(apiResp.Choices) > 0 {
-		return apiResp.Choices[0].Message.Content, nil
+		responseContent := apiResp.Choices[0].Message.Content
+		// --- Logging Start ---
+		log.Printf("[OpenRouter Response] Received Content: %s", responseContent)
+		// --- Logging End ---
+		return responseContent, nil
 	}
 
 	return "", fmt.Errorf("no content in response")
