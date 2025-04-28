@@ -101,3 +101,30 @@ func (h *GDBHandler) HandleCommand(cmd string) error { // Changed parameter to s
 	}
 	return nil // Return nil on success
 }
+
+// IsRunning returns whether GDB is currently running
+func (h *GDBHandler) IsRunning() bool {
+	return h.gdbService.IsRunning()
+}
+
+// ExecuteCommandWithOutput runs a GDB command and returns its output
+func (h *GDBHandler) ExecuteCommandWithOutput(cmd string) (string, error) {
+	// Get current logger
+	logger := h.loggerHolder.Get()
+
+	// Default timeout of 2 seconds
+	output, err := h.gdbService.ExecuteCommandWithOutput(cmd, 2)
+	if err != nil {
+		if logger != nil {
+			logger.LogError(err, "ExecuteCommandWithOutput for GDB: "+cmd)
+		}
+		return "", err
+	}
+
+	// Log that we executed the command
+	if logger != nil {
+		logger.LogTerminalOutput("(LLM-Capture) " + cmd)
+	}
+
+	return output, nil
+}

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // GDBService manages the interaction with the GDB process
@@ -18,13 +20,19 @@ type GDBService struct {
 	mutex       sync.Mutex
 	processLock sync.Mutex
 	isRunning   bool
+	// Add new fields for capturing command output
+	lastOutput     []string
+	outputLock     sync.Mutex
+	captureEnabled bool
 }
 
 // NewGDBService creates a new GDB service
 func NewGDBService() *GDBService {
 	return &GDBService{
-		outputChan: make(chan string, 100),
-		isRunning:  false,
+		outputChan:     make(chan string, 100),
+		isRunning:      false,
+		lastOutput:     make([]string, 0),
+		captureEnabled: false,
 	}
 }
 
@@ -63,6 +71,49 @@ func (g *GDBService) StartGDB(filePath string) error {
 
 	g.isRunning = true
 	return nil
+}
+
+// StartOutputCapture begins capturing output
+func (g *GDBService) StartOutputCapture() {
+	g.outputLock.Lock()
+	defer g.outputLock.Unlock()
+	g.lastOutput = make([]string, 0)
+	g.captureEnabled = true
+}
+
+// StopOutputCapture stops capturing output and returns the captured content
+func (g *GDBService) StopOutputCapture() string {
+	g.outputLock.Lock()
+	defer g.outputLock.Unlock()
+	g.captureEnabled = false
+	output := strings.Join(g.lastOutput, "\n")
+	g.lastOutput = make([]string, 0)
+	return output
+}
+
+// ExecuteCommandWithOutput executes a GDB command and captures its output
+func (g *GDBService) ExecuteCommandWithOutput(command string, timeoutSeconds int) (string, error) {
+	if !g.isRunning {
+		return "", fmt.Errorf("GDB is not running")
+	}
+
+	// Start capturing output
+	g.StartOutputCapture()
+
+	// Send the command
+	if err := g.SendCommand(command); err != nil {
+		g.StopOutputCapture() // Make sure to stop capture even on error
+		return "", err
+	}
+
+	// Wait a bit for the command to complete and output to be captured
+	// This is a simple approach - a more robust solution would use a
+	// mechanism to detect when the command has completed
+	time.Sleep(time.Duration(timeoutSeconds) * time.Second)
+
+	// Stop capturing and get the output
+	output := g.StopOutputCapture()
+	return output, nil
 }
 
 // StopGDB stops the GDB process
@@ -119,6 +170,14 @@ func (g *GDBService) readOutput() {
 	scanner := bufio.NewScanner(g.stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		// Check if output capture is enabled
+		g.outputLock.Lock()
+		if g.captureEnabled {
+			g.lastOutput = append(g.lastOutput, line)
+		}
+		g.outputLock.Unlock()
+
 		g.outputChan <- line
 	}
 

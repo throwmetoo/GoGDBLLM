@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/yourusername/gogdbllm/internal/logsession"
 	"github.com/yourusername/gogdbllm/internal/settings"
@@ -17,17 +18,26 @@ type LoggerHolder interface {
 	Get() *logsession.SessionLogger
 }
 
+// GDBCommandHandler interface for handling GDB commands
+type GDBCommandHandler interface {
+	HandleCommand(cmd string) error
+	IsRunning() bool
+	ExecuteCommandWithOutput(cmd string) (string, error)
+}
+
 // ChatHandler handles chat-related operations
 type ChatHandler struct {
 	settingsManager *settings.Manager
-	loggerHolder    LoggerHolder // Use interface type
+	loggerHolder    LoggerHolder      // Use interface type
+	gdbHandler      GDBCommandHandler // Add GDB handler
 }
 
 // NewChatHandler creates a new chat handler
-func NewChatHandler(settingsManager *settings.Manager, loggerHolder LoggerHolder) *ChatHandler { // Accept interface
+func NewChatHandler(settingsManager *settings.Manager, loggerHolder LoggerHolder, gdbHandler GDBCommandHandler) *ChatHandler {
 	return &ChatHandler{
 		settingsManager: settingsManager,
 		loggerHolder:    loggerHolder,
+		gdbHandler:      gdbHandler,
 	}
 }
 
@@ -65,8 +75,237 @@ func (h *ChatHandler) HandleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	// --- End log user input ---
 
-	// Get current settings
+	// Process the request and get the initial LLM response
+	response, err := h.processLLMRequest(chatReq)
+	if err != nil {
+		errorMsg := fmt.Sprintf("Error calling LLM API: %v", err)
+		http.Error(w, errorMsg, http.StatusInternalServerError)
+		if logger != nil {
+			logger.LogError(err, "Calling LLM API")
+		}
+		return
+	}
+
+	// We don't need to log the raw response here since it's already logged in processLLMRequest
+
+	// Parse the response as LLMResponse
+	var llmResponse LLMResponse
+	var responseText string
+	var gdbOutput string
+
+	// Check if response is a valid JSON and contains required fields
+	parseErr := json.Unmarshal([]byte(response), &llmResponse)
+	isValidJSON := parseErr == nil && llmResponse.Text != ""
+
+	// Check if there's text outside JSON structure
+	trimmedResp := strings.TrimSpace(response)
+	hasExtraText := false
+	if isValidJSON {
+		// Verify that the response is only JSON (no text before or after)
+		if !strings.HasPrefix(trimmedResp, "{") || !strings.HasSuffix(trimmedResp, "}") {
+			hasExtraText = true
+		}
+	}
+
+	// If the response is not valid JSON, has extra text, or doesn't have required fields
+	if !isValidJSON || hasExtraText {
+		if logger != nil {
+			if parseErr != nil {
+				logger.LogError(parseErr, "Parsing LLM response as JSON")
+			} else {
+				logger.LogTerminalOutput("=== JSON FORMAT ERROR ===\nLLM response contains text outside JSON structure or missing required fields\n=== END ERROR ===")
+			}
+		}
+
+		// Create a follow-up request asking the LLM to reformat its response
+		reformatReq := ChatRequest{
+			Message: `ERROR: Your previous response was not in the required JSON format, or contained text outside the JSON structure. 
+
+YOU MUST RESPOND WITH VALID JSON ONLY. No text outside the JSON object is allowed.
+
+Please reformat your entire response using EXACTLY this JSON structure and nothing else:
+{
+  "text": "Your explanation or message to the user",
+  "gdbCommands": ["command1", "command2", "..."], 
+  "waitForOutput": true/false
+}
+
+If you don't need to run GDB commands, just include an empty array for gdbCommands and set waitForOutput to false.
+
+Original response to reformat:
+` + response,
+			History:     chatReq.History,
+			SentContext: chatReq.SentContext,
+		}
+
+		// Log that we're requesting a reformatted response
+		if logger != nil && h.gdbHandler != nil && h.gdbHandler.IsRunning() {
+			logger.LogTerminalOutput("=== REQUESTING JSON REFORMAT ===")
+		}
+
+		// Send the reformatting request to the LLM
+		reformattedResponse, reformatErr := h.processLLMRequest(reformatReq)
+		if reformatErr != nil {
+			// If reformatting fails, just use the original response as plain text
+			responseText = response
+			if logger != nil {
+				logger.LogError(reformatErr, "Failed to get reformatted response from LLM")
+			}
+		} else {
+			// Don't need to log here, already logged in processLLMRequest
+
+			// Try to parse the reformatted response
+			if err := json.Unmarshal([]byte(reformattedResponse), &llmResponse); err != nil {
+				// If still not valid JSON, just use as plain text
+				responseText = reformattedResponse
+				if logger != nil {
+					logger.LogError(err, "Parsing reformatted LLM response as JSON")
+				}
+			} else {
+				// Successfully reformatted to JSON
+				responseText = llmResponse.Text
+				if responseText == "" {
+					responseText = "Sorry, I couldn't format my response correctly. Please try again."
+				}
+			}
+		}
+	} else {
+		// Valid JSON in the entire response
+		responseText = llmResponse.Text
+	}
+
+	if len(llmResponse.GDBCommands) > 0 {
+		// Log GDB commands found in response
+		if logger != nil && h.gdbHandler != nil && h.gdbHandler.IsRunning() {
+			cmdList := strings.Join(llmResponse.GDBCommands, ", ")
+			logger.LogTerminalOutput(fmt.Sprintf("=== EXECUTING GDB COMMANDS ===\nCommands: %s\nWaitForOutput: %t\n=== END COMMAND LIST ===",
+				cmdList, llmResponse.WaitForOutput))
+		}
+
+		// Process GDB commands if GDB is running
+		if h.gdbHandler != nil && h.gdbHandler.IsRunning() {
+			var commandOutputs []string
+
+			for i, cmd := range llmResponse.GDBCommands {
+				// For commands where we need to capture output
+				if llmResponse.WaitForOutput || i == len(llmResponse.GDBCommands)-1 {
+					// Use ExecuteCommandWithOutput to get the output
+					output, err := h.gdbHandler.ExecuteCommandWithOutput(cmd)
+					if err != nil {
+						if logger != nil {
+							logger.LogError(err, "Executing GDB command with output: "+cmd)
+						}
+					} else {
+						commandOutputs = append(commandOutputs, "Command: "+cmd+"\nOutput:\n"+output)
+					}
+				} else {
+					// For commands where we don't need to capture output
+					if err := h.gdbHandler.HandleCommand(cmd); err != nil {
+						if logger != nil {
+							logger.LogError(err, "Executing GDB command from LLM: "+cmd)
+						}
+					}
+
+					// Log the command execution
+					if logger != nil {
+						logger.LogTerminalOutput("(LLM) " + cmd)
+					}
+				}
+			}
+
+			// If we need to wait for output and send it back to LLM
+			if llmResponse.WaitForOutput && len(commandOutputs) > 0 {
+				// Combine all command outputs
+				gdbOutput = strings.Join(commandOutputs, "\n\n")
+
+				// Create a follow-up context item with the GDB output
+				gdbContext := ContextItem{
+					Type:        "command_output",
+					Description: "GDB Command Output",
+					Content:     gdbOutput,
+				}
+
+				// Add to original context
+				chatReq.SentContext = append(chatReq.SentContext, gdbContext)
+
+				// Log that we're sending GDB output back to LLM
+				if logger != nil && h.gdbHandler != nil && h.gdbHandler.IsRunning() {
+					logger.LogTerminalOutput(fmt.Sprintf("=== GDB OUTPUT FOR LLM ===\n%s\n=== END GDB OUTPUT ===", gdbOutput))
+				}
+
+				// Make a follow-up request to the LLM with the output
+				followupResponse, followupErr := h.processLLMRequest(chatReq)
+				if followupErr == nil {
+					// Don't need to log here, already logged in processLLMRequest
+
+					// Try to parse as JSON
+					var followupLLM LLMResponse
+					if json.Unmarshal([]byte(followupResponse), &followupLLM) == nil {
+						// If valid JSON, extract just the text portion
+						responseText = followupLLM.Text
+						if responseText == "" {
+							// Fallback if text field is empty
+							responseText = followupResponse
+						}
+					} else {
+						// Otherwise use the whole response
+						responseText = followupResponse
+					}
+				}
+			}
+		} else {
+			// GDB is not running, just send the text response
+			responseText = llmResponse.Text + "\n\n(Note: GDB is not running, cannot execute commands)"
+		}
+	}
+
+	// Send response to the user (only the text part)
+	chatResp := ChatResponse{
+		Response: responseText,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(chatResp); err != nil {
+		if logger != nil {
+			logger.LogError(err, "Encoding/Sending chat response")
+		}
+	}
+}
+
+// processLLMRequest handles the actual API call to the LLM provider
+func (h *ChatHandler) processLLMRequest(chatReq ChatRequest) (string, error) {
 	settings := h.settingsManager.GetSettings()
+	logger := h.getLogger()
+
+	// Log the request being sent to the LLM in the terminal if GDB is running
+	if h.gdbHandler != nil && h.gdbHandler.IsRunning() && logger != nil {
+		// Log basic request info
+		logMsg := fmt.Sprintf("=== LLM REQUEST (%s/%s) ===\nUser Message: %s\n",
+			settings.Provider, settings.Model, chatReq.Message)
+
+		// Log context items if any
+		if len(chatReq.SentContext) > 0 {
+			logMsg += "\nContext Items:\n"
+			for i, ctx := range chatReq.SentContext {
+				logMsg += fmt.Sprintf("[%d] Type: %s, Description: %s\n",
+					i+1, ctx.Type, ctx.Description)
+				if len(ctx.Content) > 200 {
+					// Truncate long content
+					logMsg += fmt.Sprintf("Content: %s...(truncated)\n", ctx.Content[:200])
+				} else if ctx.Content != "" {
+					logMsg += fmt.Sprintf("Content: %s\n", ctx.Content)
+				}
+			}
+		}
+
+		// Log message history summary if any
+		if len(chatReq.History) > 0 {
+			logMsg += fmt.Sprintf("\nHistory: %d previous messages\n", len(chatReq.History))
+		}
+
+		logMsg += "=== END REQUEST ===\n"
+		logger.LogTerminalOutput(logMsg)
+	}
 
 	var response string
 	var err error
@@ -81,37 +320,33 @@ func (h *ChatHandler) HandleChat(w http.ResponseWriter, r *http.Request) {
 		provider = "OpenAI"
 		response, err = h.callOpenAIAPI(chatReq, settings)
 	case "openrouter":
-		provider = "OpenRouter"
-		response, err = h.callOpenRouterAPI(chatReq, settings)
+		// Temporarily disabled
+		err = fmt.Errorf("OpenRouter is temporarily disabled. Please use Anthropic or OpenAI for JSON mode support")
+		if logger != nil {
+			logger.LogError(err, "OpenRouter is temporarily disabled")
+		}
 	default:
 		err = fmt.Errorf("unsupported provider: %s", settings.Provider)
-		http.Error(w, err.Error(), http.StatusBadRequest)
 		if logger != nil {
-			logger.LogError(err, "Checking provider in HandleChat")
+			logger.LogError(err, "Checking provider in processLLMRequest")
 		}
-		return
+		return "", err
 	}
 
 	if err != nil {
-		errorMsg := fmt.Sprintf("Error calling %s API: %v", provider, err)
-		http.Error(w, errorMsg, http.StatusInternalServerError)
 		if logger != nil {
 			logger.LogError(err, "Calling "+provider+" API")
 		}
-		return
+		return "", err
 	}
 
-	// Send response
-	chatResp := ChatResponse{
-		Response: response,
+	// Log the response received from the LLM in the terminal if GDB is running
+	if h.gdbHandler != nil && h.gdbHandler.IsRunning() && logger != nil {
+		logger.LogTerminalOutput(fmt.Sprintf("=== LLM RESPONSE (%s) ===\n%s\n=== END RESPONSE ===\n",
+			provider, response))
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(chatResp); err != nil {
-		if logger != nil {
-			logger.LogError(err, "Encoding/Sending chat response")
-		}
-	}
+	return response, nil
 }
 
 // Helper function to get logger safely within API call methods
@@ -122,8 +357,18 @@ func (h *ChatHandler) getLogger() *logsession.SessionLogger {
 // callAnthropicAPI calls the Anthropic API
 func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Settings) (string, error) {
 	logger := h.getLogger()
-	// Anthropic doesn't support a dedicated system message, so we'll include it in the first user message
-	systemMessage := "You are an AI assistant that helps with programming and debugging. Provide clear explanations and code examples when needed."
+
+	// Define system message for proper JSON formatting
+	systemMessage := `You are an AI assistant that helps with programming and debugging.
+
+YOU MUST RESPOND IN VALID JSON FORMAT according to this structure:
+{
+  "text": "Your explanation or message to the user",
+  "gdbCommands": ["command1", "command2", "..."],
+  "waitForOutput": true/false
+}
+
+Do not include any text outside the JSON structure. Your entire response must be a single JSON object.`
 
 	// --- Context Injection Start ---
 	currentUserMessageContent := chatReq.Message
@@ -140,20 +385,16 @@ func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Se
 	}
 	// --- Context Injection End ---
 
-	// Build the messages array
+	// Build the messages array (don't include system in messages for Anthropic)
 	messages := []AnthropicMessage{}
 
 	// Add chat history
-	for i, msg := range chatReq.History {
+	for _, msg := range chatReq.History {
 		role := msg.Role
 		if role == "assistant" {
 			role = "assistant"
 		} else {
 			role = "user"
-			// If this is the first user message, prepend the system message
-			if i == 0 {
-				msg.Content = systemMessage + "\n\n" + msg.Content
-			}
 		}
 		messages = append(messages, AnthropicMessage{
 			Role:    role,
@@ -167,11 +408,12 @@ func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Se
 		Content: currentUserMessageContent,
 	})
 
-	// Create request
+	// Create request with system message
 	apiReq := AnthropicRequest{
 		Model:     settings.Model,
 		Messages:  messages,
 		MaxTokens: 4096,
+		System:    systemMessage, // Use system field for enforcing JSON
 	}
 
 	if logger != nil {
@@ -254,6 +496,18 @@ func (h *ChatHandler) callAnthropicAPI(chatReq ChatRequest, settings settings.Se
 // callOpenAIAPI calls the OpenAI API
 func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Settings) (string, error) {
 	logger := h.getLogger()
+	// System message for OpenAI
+	systemMessage := `You are an AI assistant that helps with programming and debugging.
+
+YOU MUST RESPOND IN VALID JSON FORMAT according to this structure:
+{
+  "text": "Your explanation or message to the user",
+  "gdbCommands": ["command1", "command2", "..."],
+  "waitForOutput": true/false
+}
+
+Do not include any text outside the JSON structure. Your entire response must be a single JSON object.`
+
 	// --- Context Injection Start ---
 	currentUserMessageContent := chatReq.Message
 	if len(chatReq.SentContext) > 0 {
@@ -273,7 +527,7 @@ func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Setti
 	messages := []OpenAIMessage{
 		{
 			Role:    "system",
-			Content: "You are an AI assistant that helps with programming and debugging. Provide clear explanations and code examples when needed.",
+			Content: systemMessage,
 		},
 	}
 
@@ -297,10 +551,13 @@ func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Setti
 		Content: currentUserMessageContent,
 	})
 
-	// Create request
+	// Create request with JSON mode enforced
 	apiReq := OpenAIRequest{
 		Model:    settings.Model,
 		Messages: messages,
+		ResponseFormat: &ResponseFormat{
+			Type: "json_object",
+		},
 	}
 
 	if logger != nil {
@@ -383,6 +640,59 @@ func (h *ChatHandler) callOpenAIAPI(chatReq ChatRequest, settings settings.Setti
 // callOpenRouterAPI calls the OpenRouter API
 func (h *ChatHandler) callOpenRouterAPI(chatReq ChatRequest, settings settings.Settings) (string, error) {
 	logger := h.getLogger()
+	// System message for OpenRouter
+	systemMessage := `You are an AI assistant that helps with programming and debugging.
+
+⚠️ CRITICAL INSTRUCTION ⚠️: YOU MUST RESPOND WITH VALID JSON ONLY. Your entire response must be a single JSON object without any text before or after it.
+
+REQUIRED JSON FORMAT:
+{
+  "text": "Your explanation or message to the user",
+  "gdbCommands": ["command1", "command2", "..."],
+  "waitForOutput": true/false
+}
+
+Failure to format your response as proper JSON will result in an error and your response will not be processed correctly.
+
+DO NOT include any explanatory text, greeting, or other content outside the JSON structure.
+DO NOT use markdown formatting or code blocks around the JSON.
+ONLY return the JSON object itself.
+
+- text: Your message that will be shown to the user (required)
+- gdbCommands: Array of GDB commands to execute (can be empty array [])
+- waitForOutput: If true, the output from your GDB commands will be automatically captured and sent back to you for analysis without user intervention; if false, execute all commands in sequence
+
+COMMAND FEEDBACK LOOP: When waitForOutput is true, the system will:
+1. Execute your GDB commands
+2. Capture the output
+3. Automatically send the output back to you
+4. You must respond with another properly formatted JSON object
+
+EXAMPLES OF CORRECT RESPONSES:
+
+To run "info registers" and automatically get the output back:
+{
+  "text": "Let me check the current register values for you.",
+  "gdbCommands": ["info registers"],
+  "waitForOutput": true
+}
+
+To set a breakpoint and continue execution without waiting:
+{
+  "text": "I'll set a breakpoint at main() and start execution.",
+  "gdbCommands": ["break main", "run"],
+  "waitForOutput": false
+}
+
+To provide information without running GDB commands:
+{
+  "text": "The segmentation fault occurs when the program tries to access memory that it doesn't have permission to access.",
+  "gdbCommands": [],
+  "waitForOutput": false
+}
+
+REMINDER: EVERY response must be ONLY this JSON format with no text outside the JSON.`
+
 	// --- Context Injection Start ---
 	currentUserMessageContent := chatReq.Message
 	if len(chatReq.SentContext) > 0 {
@@ -402,7 +712,7 @@ func (h *ChatHandler) callOpenRouterAPI(chatReq ChatRequest, settings settings.S
 	messages := []OpenRouterMessage{
 		{
 			Role:    "system",
-			Content: "You are an AI assistant that helps with programming and debugging. Provide clear explanations and code examples when needed.",
+			Content: systemMessage,
 		},
 	}
 

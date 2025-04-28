@@ -26,6 +26,13 @@ type ChatResponse struct {
 	Response string `json:"response"`
 }
 
+// LLMResponse represents a structured response from the LLM
+type LLMResponse struct {
+	Text          string   `json:"text"`          // Text to display to the user
+	GDBCommands   []string `json:"gdbCommands"`   // Array of GDB commands to execute
+	WaitForOutput bool     `json:"waitForOutput"` // Whether to wait for output before continuing
+}
+
 // --- LLM Provider Specific Structs ---
 
 // AnthropicMessage represents a message for Anthropic API
@@ -39,6 +46,7 @@ type AnthropicRequest struct {
 	Model     string             `json:"model"`
 	Messages  []AnthropicMessage `json:"messages"`
 	MaxTokens int                `json:"max_tokens"`
+	System    string             `json:"system,omitempty"`
 }
 
 // AnthropicResponse represents a response from the Anthropic API
@@ -57,8 +65,14 @@ type OpenAIMessage struct {
 
 // OpenAIRequest represents a request to the OpenAI API
 type OpenAIRequest struct {
-	Model    string          `json:"model"`
-	Messages []OpenAIMessage `json:"messages"`
+	Model          string          `json:"model"`
+	Messages       []OpenAIMessage `json:"messages"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+}
+
+// ResponseFormat specifies the format for OpenAI API responses
+type ResponseFormat struct {
+	Type string `json:"type"`
 }
 
 // OpenAIResponse represents a response from the OpenAI API

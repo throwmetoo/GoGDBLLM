@@ -261,6 +261,41 @@ function initChatPanel() {
         }
     }
     
+    // Process LLM response - attempt to parse JSON if present
+    function processLLMResponse(responseText) {
+        // Try to parse response as JSON
+        try {
+            // Ensure we're working with a string
+            if (typeof responseText !== 'string') {
+                console.warn('processLLMResponse received non-string input:', responseText);
+                return responseText;
+            }
+            
+            // Check if it looks like JSON (starts with { and ends with })
+            const trimmed = responseText.trim();
+            if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                const jsonData = JSON.parse(trimmed);
+                
+                // Check if this is our expected format with a text field
+                if (jsonData && typeof jsonData.text === 'string') {
+                    console.log('Successfully parsed LLM response as JSON:', jsonData);
+                    
+                    // Extract GDB commands if present
+                    if (jsonData.gdbCommands && Array.isArray(jsonData.gdbCommands) && jsonData.gdbCommands.length > 0) {
+                        console.log('JSON contains GDB commands:', jsonData.gdbCommands);
+                    }
+                    
+                    return jsonData.text;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to parse response as JSON:', e);
+        }
+        
+        // If not JSON or parsing failed, return the original text
+        return responseText;
+    }
+
     // Send chat message
     async function sendMessage() {
         const userQuery = chatInput.value.trim();
@@ -313,18 +348,23 @@ function initChatPanel() {
             }
 
             const data = await response.json();
+            console.log('Raw LLM response:', data.response);
+
+            // Process the response to extract text from JSON if needed
+            const llmResponseText = processLLMResponse(data.response);
+            console.log('Processed LLM response:', llmResponseText);
 
             const assistantMessage = {
                 role: 'assistant',
-                content: data.response,
-                // Assistant messages won't have 'sentContext'
+                content: data.response, // Store original response (with JSON) in history
             };
-            addMessageToUI(assistantMessage.role, assistantMessage.content);
+            
+            // Display the processed text to the user
+            addMessageToUI(assistantMessage.role, llmResponseText);
 
-            // Add both user and assistant messages to history *after* successful API call
-            // Store the user message *with* its context for UI display
+            // Add both user and assistant messages to history
             chatHistory.push(userMessage);
-            chatHistory.push(assistantMessage); // Assistant message has no sentContext
+            chatHistory.push(assistantMessage);
 
         } catch (error) {
             console.error('Error sending message:', error);
@@ -341,8 +381,20 @@ function initChatPanel() {
 
         const textElement = document.createElement('div');
         textElement.classList.add('message-content');
+        
+        // Process content if it's from the assistant AND isn't already processed
+        // (check if it has a property called processedContent)
+        let displayContent = content;
+        
+        // Only process content in addMessageToUI if it hasn't been processed already
+        // by sendMessage function (which would pass the already processed text)
+        if (role === 'assistant' && typeof content === 'string' && 
+            content.trim().startsWith('{') && content.trim().endsWith('}')) {
+            displayContent = processLLMResponse(content);
+        }
+        
         // Basic escaping, replace with Markdown rendering if available
-        const escapedContent = content.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const escapedContent = displayContent.replace(/</g, "&lt;").replace(/>/g, "&gt;");
         textElement.innerHTML = escapedContent;
         messageElement.appendChild(textElement);
 

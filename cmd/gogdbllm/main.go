@@ -71,9 +71,9 @@ func main() {
 	go hub.Run()
 
 	// Initialize API handlers (pass shared logger holder)
-	fileHandler := handlers.NewFileHandler(uploadsDir, sharedLogger) // Pass sharedLogger
-	gdbHandler := handlers.NewGDBHandler(hub, sharedLogger)          // Pass sharedLogger
-	chatHandler := api.NewChatHandler(settingsManager, sharedLogger) // Pass sharedLogger
+	fileHandler := handlers.NewFileHandler(uploadsDir, sharedLogger)             // Pass sharedLogger
+	gdbHandler := handlers.NewGDBHandler(hub, sharedLogger)                      // Pass sharedLogger
+	chatHandler := api.NewChatHandler(settingsManager, sharedLogger, gdbHandler) // Pass GDB handler
 	settingsHandler := handlers.NewSettingsHandler(settingsManager)
 
 	// Register API routes
