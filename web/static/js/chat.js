@@ -20,6 +20,7 @@ function initChatPanel() {
     const sendChatBtn = document.getElementById('sendChatBtn');
     const terminalOutput = document.getElementById('terminalOutput');
     const terminal = document.getElementById('terminal');
+    const selectLastCmdOutputBtn = document.getElementById('selectLastCmdOutputBtn'); // Added: Get new button
     // Placeholder for the context preview area - add this div in your HTML near the chat input
     const contextPreviewArea = document.getElementById('contextPreviewArea'); // Example ID: <div id="contextPreviewArea"></div>
     
@@ -153,8 +154,31 @@ function initChatPanel() {
              terminalOutput.textContent = ''; // Clear the renamed "Selected Context" area
         }
         // Optionally, update chat input placeholder if needed
-        chatInput.placeholder = "Type your message...";
+        chatInput.placeholder = "Ask a question about your debugging session...";
     }
+    
+    // Added: Event listener for the new button
+    selectLastCmdOutputBtn.addEventListener('click', () => {
+        if (window.AppTerminal && typeof window.AppTerminal.getLastCommandOutput === 'function') {
+            const lastOutput = window.AppTerminal.getLastCommandOutput();
+            if (lastOutput && lastOutput.trim() !== '') {
+                stagedContext = lastOutput.trim();
+                // Update the existing preview area for now
+                if (terminalOutput) {
+                    terminalOutput.textContent = stagedContext;
+                }
+                // Optionally use the dedicated preview area if it exists
+                // showContextPreview(stagedContext);
+                chatInput.placeholder = "Ask about last command output...";
+            } else {
+                clearStagedContext(); // Clear if there's no output
+                AppUtils.showNotification('No output captured since last command.', 'info');
+            }
+        } else {
+            console.error('TerminalInterface or getLastCommandOutput not available.');
+            AppUtils.showNotification('Error accessing terminal output.', 'error');
+        }
+    });
     
     // Add context menu listener to the terminal
     terminal.addEventListener('contextmenu', (event) => {

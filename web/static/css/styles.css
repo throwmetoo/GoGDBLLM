@@ -378,6 +378,9 @@ body {
 
 .chat-input-wrapper {
     display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 0.5rem;
     padding: 0.75rem;
     border-top: 1px solid var(--border-color);
     background-color: var(--surface-color);
@@ -393,13 +396,35 @@ body {
     resize: none;
     min-height: 60px;
     font-family: var(--font-sans);
+    margin-bottom: 0;
+}
+
+/* Container for the stacked buttons */
+.chat-button-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Style for the added context button */
+.context-btn {
+    padding: 0.5rem 1rem;
+    background-color: var(--secondary-bg-color, #f0f0f0);
+    border: 1px solid var(--border-color, #ccc);
+    color: var(--text-secondary-color, #333);
+    cursor: pointer;
+    border-radius: 4px;
+    text-align: center;
+    transition: background-color 0.2s ease;
+}
+
+.context-btn:hover {
+    background-color: var(--border-color, #ddd);
 }
 
 .send-btn {
-    margin-left: 0.5rem;
     background-color: var(--primary-color);
     color: white;
-    align-self: flex-end;
 }
 
 .chat-info {

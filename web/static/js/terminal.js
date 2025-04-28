@@ -13,6 +13,8 @@ function initTerminalSection() {
     let commandHistory = [];
     let historyIndex = -1;
     let terminalConnected = false;
+    let lastCommandOutputBuffer = "";
+    let isCapturingOutput = false;
     
     // Special control characters
     const CTRL_C = '\x03';  // Control-C character
@@ -85,6 +87,11 @@ function initTerminalSection() {
         // Convert the entire chunk's ANSI codes to HTML (includes <br> for newlines)
         const html = ansi_up.ansi_to_html(text);
 
+        // Added: Capture raw text if flag is set
+        if (isCapturingOutput) {
+            lastCommandOutputBuffer += text;
+        }
+
         // Create a block container (div) for this message chunk
         const messageContainer = document.createElement('div');
         
@@ -111,6 +118,10 @@ function initTerminalSection() {
             connectWebSocket();
             return;
         }
+        
+        // Added: Reset buffer and start capturing before sending command
+        lastCommandOutputBuffer = "";
+        isCapturingOutput = true;
         
         // Add command to history
         if (command.trim() !== '') {
@@ -212,7 +223,10 @@ function initTerminalSection() {
     // Return public interface
     return {
         appendToTerminal,
-        sendCommand
+        sendCommand,
+        getLastCommandOutput: () => {
+            return lastCommandOutputBuffer;
+        }
     };
 }
 
