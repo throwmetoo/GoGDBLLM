@@ -13,8 +13,35 @@ function initTerminalSection() {
     let commandHistory = [];
     let historyIndex = -1;
     let terminalConnected = false;
-    let lastCommandOutputBuffer = "";
-    let isCapturingOutput = false;
+    
+    // Define a maximum buffer size to prevent memory issues (roughly 50KB)
+    const MAX_BUFFER_SIZE = 50000;
+    
+    // Create a simple output history tracker that keeps the last N lines
+    const outputHistory = {
+        buffer: [],
+        maxLines: 500, // Keep last 500 lines
+        
+        addLine(text) {
+            // Split by newlines and add each line separately
+            const lines = text.split('\n');
+            for (const line of lines) {
+                this.buffer.push(line);
+                // Keep buffer at maxLines size
+                if (this.buffer.length > this.maxLines) {
+                    this.buffer.shift();
+                }
+            }
+        },
+        
+        getAll() {
+            return this.buffer.join('\n');
+        },
+        
+        clear() {
+            this.buffer = [];
+        }
+    };
     
     // Special control characters
     const CTRL_C = '\x03';  // Control-C character
@@ -87,10 +114,8 @@ function initTerminalSection() {
         // Convert the entire chunk's ANSI codes to HTML (includes <br> for newlines)
         const html = ansi_up.ansi_to_html(text);
 
-        // Added: Capture raw text if flag is set
-        if (isCapturingOutput) {
-            lastCommandOutputBuffer += text;
-        }
+        // Always add to the output history
+        outputHistory.addLine(text);
 
         // Create a block container (div) for this message chunk
         const messageContainer = document.createElement('div');
@@ -118,10 +143,6 @@ function initTerminalSection() {
             connectWebSocket();
             return;
         }
-        
-        // Added: Reset buffer and start capturing before sending command
-        lastCommandOutputBuffer = "";
-        isCapturingOutput = true;
         
         // Add command to history
         if (command.trim() !== '') {
@@ -225,7 +246,11 @@ function initTerminalSection() {
         appendToTerminal,
         sendCommand,
         getLastCommandOutput: () => {
-            return lastCommandOutputBuffer;
+            // Get all terminal text from the saved history
+            return outputHistory.getAll();
+        },
+        clearOutputHistory: () => {
+            outputHistory.clear();
         }
     };
 }

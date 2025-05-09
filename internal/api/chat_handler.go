@@ -174,6 +174,18 @@ Original response to reformat:
 		responseText = llmResponse.Text
 	}
 
+	// Handle cases where the LLM response might be cut off
+	// Check for responses that start with text but don't end with proper punctuation
+	if !strings.HasPrefix(responseText, "{") && len(responseText) > 0 {
+		lastChar := responseText[len(responseText)-1]
+		// If the response doesn't end with common sentence-ending punctuation
+		if lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != ':' &&
+			!strings.HasSuffix(responseText, "```") {
+			// Add an ellipsis to indicate the response was cut off
+			responseText += " [Response may be incomplete...]"
+		}
+	}
+
 	if len(llmResponse.GDBCommands) > 0 {
 		// Log GDB commands found in response
 		if logger != nil && h.gdbHandler != nil && h.gdbHandler.IsRunning() {
@@ -256,6 +268,21 @@ Original response to reformat:
 		} else {
 			// GDB is not running, just send the text response
 			responseText = llmResponse.Text + "\n\n(Note: GDB is not running, cannot execute commands)"
+		}
+	}
+
+	// Final check for potentially truncated non-JSON responses
+	if !strings.HasPrefix(responseText, "{") && len(responseText) > 0 {
+		lastChar := responseText[len(responseText)-1]
+		// If the response doesn't end with common sentence-ending punctuation
+		if lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != ':' &&
+			!strings.HasSuffix(responseText, "```") &&
+			!strings.HasSuffix(responseText, "may be incomplete...") {
+			// Add an ellipsis to indicate the response was cut off
+			responseText += " [Response may be incomplete...]"
+			if logger != nil {
+				logger.LogTerminalOutput("WARNING: Final response appears to be cut off, adding indicator")
+			}
 		}
 	}
 
@@ -479,18 +506,34 @@ Do not include any text outside the JSON structure. Your entire response must be
 	}
 
 	// Extract content
-	var content string
-	for _, c := range apiResp.Content {
-		if c.Type == "text" {
-			content += c.Text
+	if len(apiResp.Content) > 0 && apiResp.Content[0].Type == "text" {
+		responseContent := apiResp.Content[0].Text
+		if logger != nil {
+			logger.LogLLMResponse(responseContent)
 		}
+
+		// Check if the response might be cut off (for non-JSON responses)
+		if !strings.HasPrefix(responseContent, "{") && len(responseContent) > 0 {
+			lastChar := responseContent[len(responseContent)-1]
+			// If the response doesn't end with common sentence-ending punctuation
+			if lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != ':' &&
+				!strings.HasSuffix(responseContent, "```") {
+				// Add an ellipsis to indicate the response was cut off
+				responseContent += " [Response may be incomplete...]"
+				if logger != nil {
+					logger.LogTerminalOutput("WARNING: LLM response appears to be cut off, adding indicator")
+				}
+			}
+		}
+
+		return responseContent, nil
 	}
 
+	err = fmt.Errorf("no content in Anthropic response")
 	if logger != nil {
-		logger.LogLLMResponse(content)
+		logger.LogError(err, "Extracting content from Anthropic response")
 	}
-
-	return content, nil
+	return "", err
 }
 
 // callOpenAIAPI calls the OpenAI API
@@ -627,6 +670,21 @@ Do not include any text outside the JSON structure. Your entire response must be
 		if logger != nil {
 			logger.LogLLMResponse(responseContent)
 		}
+
+		// Check if the response might be cut off (for non-JSON responses)
+		if !strings.HasPrefix(responseContent, "{") && len(responseContent) > 0 {
+			lastChar := responseContent[len(responseContent)-1]
+			// If the response doesn't end with common sentence-ending punctuation
+			if lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != ':' &&
+				!strings.HasSuffix(responseContent, "```") {
+				// Add an ellipsis to indicate the response was cut off
+				responseContent += " [Response may be incomplete...]"
+				if logger != nil {
+					logger.LogTerminalOutput("WARNING: LLM response appears to be cut off, adding indicator")
+				}
+			}
+		}
+
 		return responseContent, nil
 	}
 

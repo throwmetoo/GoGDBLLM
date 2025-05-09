@@ -166,13 +166,19 @@ function initChatPanel() {
                 // Update the existing preview area for now
                 if (terminalOutput) {
                     terminalOutput.textContent = stagedContext;
+                    
+                    // Log successful capture for debugging
+                    console.log("Successfully captured terminal output:", stagedContext.length, "characters");
                 }
                 // Optionally use the dedicated preview area if it exists
                 // showContextPreview(stagedContext);
-                chatInput.placeholder = "Ask about last command output...";
+                chatInput.placeholder = "Ask about terminal output...";
+                
+                // Give feedback to the user
+                AppUtils.showNotification('Terminal output added to context', 'success');
             } else {
                 clearStagedContext(); // Clear if there's no output
-                AppUtils.showNotification('No output captured since last command.', 'info');
+                AppUtils.showNotification('No terminal output available', 'info');
             }
         } else {
             console.error('TerminalInterface or getLastCommandOutput not available.');
@@ -280,12 +286,24 @@ function initChatPanel() {
                 if (jsonData && typeof jsonData.text === 'string') {
                     console.log('Successfully parsed LLM response as JSON:', jsonData);
                     
-                    // Extract GDB commands if present
+                    // Execute GDB commands if present
                     if (jsonData.gdbCommands && Array.isArray(jsonData.gdbCommands) && jsonData.gdbCommands.length > 0) {
                         console.log('JSON contains GDB commands:', jsonData.gdbCommands);
+                        // Process commands if possible here or pass them to terminal
+                        if (window.AppTerminal && typeof window.AppTerminal.sendCommand === 'function') {
+                            jsonData.gdbCommands.forEach(cmd => {
+                                setTimeout(() => {
+                                    console.log('Auto-executing GDB command:', cmd);
+                                    window.AppTerminal.sendCommand(cmd);
+                                }, 100); // Small delay between commands
+                            });
+                        }
                     }
                     
-                    return jsonData.text;
+                    return {
+                        processedContent: jsonData.text,
+                        originalJson: jsonData
+                    };
                 }
             }
         } catch (e) {
@@ -293,7 +311,10 @@ function initChatPanel() {
         }
         
         // If not JSON or parsing failed, return the original text
-        return responseText;
+        return {
+            processedContent: responseText,
+            originalJson: null
+        };
     }
 
     // Send chat message
@@ -351,16 +372,33 @@ function initChatPanel() {
             console.log('Raw LLM response:', data.response);
 
             // Process the response to extract text from JSON if needed
-            const llmResponseText = processLLMResponse(data.response);
-            console.log('Processed LLM response:', llmResponseText);
+            const processedResult = processLLMResponse(data.response);
+            console.log('Processed LLM response:', processedResult.processedContent);
+
+            // Check if the response was cut off (ends without proper punctuation or sentence completion)
+            let responseContent = processedResult.processedContent;
+            if (typeof responseContent === 'string' && 
+                responseContent.length > 0 && 
+                !responseContent.endsWith('.') && 
+                !responseContent.endsWith('!') && 
+                !responseContent.endsWith('?') && 
+                !responseContent.endsWith(':') &&
+                !responseContent.endsWith('```')) {
+                
+                // Add an ellipsis to indicate the response was cut off
+                responseContent += ' [...]';
+                console.warn('Response appears to be cut off, adding indicator');
+            }
 
             const assistantMessage = {
                 role: 'assistant',
                 content: data.response, // Store original response (with JSON) in history
+                processedContent: responseContent, // Store the processed content (with cut-off indicator if needed)
+                originalJson: processedResult.originalJson // Store the parsed JSON if available
             };
             
             // Display the processed text to the user
-            addMessageToUI(assistantMessage.role, llmResponseText);
+            addMessageToUI(assistantMessage.role, assistantMessage);
 
             // Add both user and assistant messages to history
             chatHistory.push(userMessage);
@@ -382,19 +420,27 @@ function initChatPanel() {
         const textElement = document.createElement('div');
         textElement.classList.add('message-content');
         
-        // Process content if it's from the assistant AND isn't already processed
-        // (check if it has a property called processedContent)
-        let displayContent = content;
+        // Determine what to display - handle both string content and object content with processedContent
+        let displayContent;
         
-        // Only process content in addMessageToUI if it hasn't been processed already
-        // by sendMessage function (which would pass the already processed text)
-        if (role === 'assistant' && typeof content === 'string' && 
-            content.trim().startsWith('{') && content.trim().endsWith('}')) {
-            displayContent = processLLMResponse(content);
+        if (typeof content === 'object' && content !== null && content.processedContent) {
+            // This is a message object from sendMessage with already processed content
+            displayContent = content.processedContent;
+        } else if (role === 'assistant' && typeof content === 'string' && 
+                   content.trim().startsWith('{') && content.trim().endsWith('}')) {
+            // This is a string that looks like JSON and needs processing
+            const processedResult = processLLMResponse(content);
+            displayContent = processedResult.processedContent;
+        } else {
+            // This is a regular string message
+            displayContent = content;
         }
         
         // Basic escaping, replace with Markdown rendering if available
-        const escapedContent = displayContent.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const escapedContent = typeof displayContent === 'string' ? 
+            displayContent.replace(/</g, "&lt;").replace(/>/g, "&gt;") : 
+            'Invalid message content';
+            
         textElement.innerHTML = escapedContent;
         messageElement.appendChild(textElement);
 
@@ -436,12 +482,6 @@ function initChatPanel() {
 
         chatMessages.appendChild(messageElement);
         chatMessages.scrollTop = chatMessages.scrollHeight;
-
-        // Add message to internal history if it's not an error/thinking message
-        if (role !== 'error' && role !== 'thinking') {
-            // Note: We push to chatHistory in sendMessage *after* successful API call now
-            // to ensure we store the user message with its context correctly.
-        }
     }
     
     // Add thinking message

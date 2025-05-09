@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 
+	"github.com/yourusername/gogdbllm/internal/config"
 	"github.com/yourusername/gogdbllm/internal/gdb"
 	"github.com/yourusername/gogdbllm/internal/utils"
 	"github.com/yourusername/gogdbllm/internal/websocket"
@@ -24,9 +25,9 @@ type GDBHandler struct {
 }
 
 // NewGDBHandler creates a new GDB handler
-func NewGDBHandler(hub *websocket.Hub, loggerHolder LoggerHolder) *GDBHandler { // Accept interface
+func NewGDBHandler(hub *websocket.Hub, loggerHolder LoggerHolder, cfg *config.Config) *GDBHandler { // Accept config
 	return &GDBHandler{
-		gdbService:   gdb.NewGDBService(),
+		gdbService:   gdb.NewGDBService(cfg),
 		hub:          hub,
 		loggerHolder: loggerHolder,
 	}

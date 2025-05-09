@@ -8,6 +8,8 @@ import (
 	"github.com/yourusername/gogdbllm/internal/gdb"
 	"github.com/yourusername/gogdbllm/internal/handlers"
 	"github.com/yourusername/gogdbllm/internal/logger"
+	"github.com/yourusername/gogdbllm/internal/logsession"
+	"github.com/yourusername/gogdbllm/internal/settings"
 	"github.com/yourusername/gogdbllm/internal/websocket"
 	"go.uber.org/dig"
 )
@@ -26,18 +28,29 @@ func NewContainer() *Container {
 
 // Configure sets up the dependency injection container
 func (c *Container) Configure(configPath string) error {
+	// Initialize logger - call directly instead of providing a function
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Initialize logger directly
+	if err := logger.Init(cfg); err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
+	}
+
 	// Provide config
-	if err := c.container.Provide(func() (*config.Config, error) {
-		return config.LoadConfig(configPath)
+	if err := c.container.Provide(func() *config.Config {
+		return cfg
 	}); err != nil {
 		return fmt.Errorf("failed to provide config: %w", err)
 	}
 
-	// Initialize logger
-	if err := c.container.Provide(func(cfg *config.Config) error {
-		return logger.Init(cfg)
+	// Provide LoggerHolder - a shared instance for all handlers
+	if err := c.container.Provide(func() handlers.LoggerHolder {
+		return logsession.NewLoggerHolder()
 	}); err != nil {
-		return fmt.Errorf("failed to provide logger initializer: %w", err)
+		return fmt.Errorf("failed to provide logger holder: %w", err)
 	}
 
 	// Provide WebSocket hub
@@ -63,8 +76,29 @@ func (c *Container) Configure(configPath string) error {
 	}
 
 	// Provide GDB service
-	if err := c.container.Provide(gdb.NewService); err != nil {
+	if err := c.container.Provide(gdb.NewGDBService); err != nil {
 		return fmt.Errorf("failed to provide GDB service: %w", err)
+	}
+
+	// Provide settings manager
+	if err := c.container.Provide(func() (*settings.Manager, error) {
+		return settings.NewManager("")
+	}); err != nil {
+		return fmt.Errorf("failed to provide settings manager: %w", err)
+	}
+
+	// Provide LoggerHolder for API package
+	if err := c.container.Provide(func(holder handlers.LoggerHolder) api.LoggerHolder {
+		return holder // Use the same LoggerHolder instance
+	}); err != nil {
+		return fmt.Errorf("failed to provide API logger holder: %w", err)
+	}
+
+	// Provide GDBCommandHandler for API package
+	if err := c.container.Provide(func(handler *handlers.GDBHandler) api.GDBCommandHandler {
+		return handler // Use GDBHandler as GDBCommandHandler
+	}); err != nil {
+		return fmt.Errorf("failed to provide API GDB command handler: %w", err)
 	}
 
 	return nil

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yourusername/gogdbllm/internal/config"
 	"github.com/yourusername/gogdbllm/internal/logsession" // Import logsession
 )
 
@@ -27,9 +28,9 @@ type FileHandler struct {
 }
 
 // NewFileHandler creates a new file handler
-func NewFileHandler(uploadsDir string, loggerHolder LoggerHolder) *FileHandler { // Accept interface
+func NewFileHandler(cfg *config.Config, loggerHolder LoggerHolder) *FileHandler { // Use config
 	return &FileHandler{
-		uploadsDir:   uploadsDir,
+		uploadsDir:   cfg.Uploads.Directory,
 		loggerHolder: loggerHolder,
 	}
 }
