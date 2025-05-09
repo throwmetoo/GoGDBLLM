@@ -2,6 +2,7 @@ package gdb
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os/exec"
@@ -9,6 +10,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/yourusername/gogdbllm/internal/config"
+	appErrors "github.com/yourusername/gogdbllm/internal/errors"
 )
 
 // GDBService manages the interaction with the GDB process
@@ -24,15 +28,17 @@ type GDBService struct {
 	lastOutput     []string
 	outputLock     sync.Mutex
 	captureEnabled bool
+	config         *config.GDBConfig
 }
 
 // NewGDBService creates a new GDB service
-func NewGDBService() *GDBService {
+func NewGDBService(cfg *config.Config) *GDBService {
 	return &GDBService{
 		outputChan:     make(chan string, 100),
 		isRunning:      false,
 		lastOutput:     make([]string, 0),
 		captureEnabled: false,
+		config:         &cfg.GDB,
 	}
 }
 
@@ -47,18 +53,18 @@ func (g *GDBService) StartGDB(filePath string) error {
 	}
 
 	// Create a new GDB command
-	g.cmd = exec.Command("gdb", filePath)
+	g.cmd = exec.Command(g.config.Path, filePath)
 
 	// Set up stdin and stdout
 	var err error
 	g.stdin, err = g.cmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %v", err)
+		return appErrors.Wrap(err, "failed to create stdin pipe")
 	}
 
 	g.stdout, err = g.cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %v", err)
+		return appErrors.Wrap(err, "failed to create stdout pipe")
 	}
 
 	// Start reading from stdout
@@ -66,7 +72,7 @@ func (g *GDBService) StartGDB(filePath string) error {
 
 	// Start the command
 	if err := g.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start GDB: %v", err)
+		return appErrors.Wrap(err, "failed to start GDB")
 	}
 
 	g.isRunning = true
@@ -94,8 +100,12 @@ func (g *GDBService) StopOutputCapture() string {
 // ExecuteCommandWithOutput executes a GDB command and captures its output
 func (g *GDBService) ExecuteCommandWithOutput(command string, timeoutSeconds int) (string, error) {
 	if !g.isRunning {
-		return "", fmt.Errorf("GDB is not running")
+		return "", appErrors.ErrGDBNotRunning
 	}
+
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
 
 	// Start capturing output
 	g.StartOutputCapture()
@@ -106,14 +116,27 @@ func (g *GDBService) ExecuteCommandWithOutput(command string, timeoutSeconds int
 		return "", err
 	}
 
-	// Wait a bit for the command to complete and output to be captured
-	// This is a simple approach - a more robust solution would use a
-	// mechanism to detect when the command has completed
-	time.Sleep(time.Duration(timeoutSeconds) * time.Second)
+	// Create a channel for completion
+	done := make(chan struct{})
 
-	// Stop capturing and get the output
-	output := g.StopOutputCapture()
-	return output, nil
+	// Wait for timeout or completion
+	go func() {
+		// This is a simplified approach that assumes a specific timeout is sufficient
+		// A more robust approach would parse GDB output to detect command completion
+		time.Sleep(time.Duration(timeoutSeconds-1) * time.Second)
+		close(done)
+	}()
+
+	// Wait for either context done or completion
+	select {
+	case <-ctx.Done():
+		g.StopOutputCapture()
+		return "", appErrors.Wrap(ctx.Err(), "GDB command timed out")
+	case <-done:
+		// Command completed
+		output := g.StopOutputCapture()
+		return output, nil
+	}
 }
 
 // StopGDB stops the GDB process
@@ -146,11 +169,14 @@ func (g *GDBService) SendCommand(command string) error {
 	defer g.mutex.Unlock()
 
 	if !g.isRunning {
-		return fmt.Errorf("GDB is not running")
+		return appErrors.ErrGDBNotRunning
 	}
 
 	_, err := fmt.Fprintln(g.stdin, command)
-	return err
+	if err != nil {
+		return appErrors.Wrap(err, "failed to send command to GDB")
+	}
+	return nil
 }
 
 // GetOutputChannel returns the channel for GDB output
