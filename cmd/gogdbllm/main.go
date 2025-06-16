@@ -116,7 +116,7 @@ func setupRoutes(router *mux.Router) error {
 		fileHandler *handlers.FileHandler,
 		gdbHandler *handlers.GDBHandler,
 		settingsHandler *handlers.SettingsHandler,
-		chatHandler *api.ChatHandler,
+		chatHandler *api.SimpleChatHandler,
 		wsHub *websocket.Hub,
 	) {
 		// Register API routes

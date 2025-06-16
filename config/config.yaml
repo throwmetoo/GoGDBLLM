@@ -22,4 +22,66 @@ logs:
 
 uploads:
   directory: "./uploads"
-  max_file_size: 10485760 # 10MB in bytes 
+  max_file_size: 10485760 # 10MB in bytes
+
+# Chat service configuration
+chat:
+  # Request caching
+  cache:
+    enabled: false
+    ttl: 1h
+    max_size: 1000
+    compression: true
+  
+  # Context management
+  context:
+    enabled: false
+    max_tokens: 4000
+    priority_recent_messages: 10
+    compression_threshold: 100
+    preserve_system_context: true
+  
+  # Retry configuration
+  retry:
+    max_attempts: 3
+    base_delay: 1s
+    max_delay: 30s
+    jitter: true
+    backoff_multiplier: 2.0
+  
+  # Circuit breaker
+  circuit_breaker:
+    failure_threshold: 5
+    timeout: 30s
+  
+  # Providers configuration
+  providers:
+    anthropic:
+      name: "anthropic"
+      type: "anthropic"
+      enabled: true
+      base_url: "https://api.anthropic.com"
+      default_model: "claude-3-sonnet-20240229"
+      timeout: 30s
+      max_tokens: 4096
+      rate_limit:
+        requests_per_minute: 50
+        tokens_per_minute: 40000
+      cost_per_token:
+        input_tokens: 0.000003
+        output_tokens: 0.000015
+    
+    openai:
+      name: "openai"
+      type: "openai"
+      enabled: true
+      base_url: "https://api.openai.com"
+      default_model: "gpt-4-turbo"
+      timeout: 30s
+      max_tokens: 4096
+      rate_limit:
+        requests_per_minute: 50
+        tokens_per_minute: 40000
+      cost_per_token:
+        input_tokens: 0.00001
+        output_tokens: 0.00003 

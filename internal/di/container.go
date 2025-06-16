@@ -71,8 +71,15 @@ func (c *Container) Configure(configPath string) error {
 		return fmt.Errorf("failed to provide settings handler: %w", err)
 	}
 
-	if err := c.container.Provide(api.NewChatHandler); err != nil {
-		return fmt.Errorf("failed to provide chat handler: %w", err)
+	// Provide simple chat handler (clean architecture)
+	if err := c.container.Provide(func(
+		settingsManager *settings.Manager,
+		loggerHolder api.LoggerHolder,
+		gdbHandler api.GDBCommandHandler,
+	) *api.SimpleChatHandler {
+		return api.NewSimpleChatHandler(settingsManager, loggerHolder, gdbHandler)
+	}); err != nil {
+		return fmt.Errorf("failed to provide simple chat handler: %w", err)
 	}
 
 	// Provide GDB service

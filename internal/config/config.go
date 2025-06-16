@@ -17,6 +17,7 @@ type Config struct {
 	GDB     GDBConfig     `mapstructure:"gdb"`
 	Logs    LogConfig     `mapstructure:"logs"`
 	Uploads UploadsConfig `mapstructure:"uploads"`
+	Chat    ChatConfig    `mapstructure:"chat"`
 }
 
 // ServerConfig holds server-related configuration
@@ -51,6 +52,46 @@ type LogConfig struct {
 type UploadsConfig struct {
 	Directory   string `mapstructure:"directory"`
 	MaxFileSize int64  `mapstructure:"max_file_size"` // in bytes
+}
+
+// ChatConfig holds chat service configuration
+type ChatConfig struct {
+	Cache          CacheConfig          `mapstructure:"cache"`
+	Context        ContextConfig        `mapstructure:"context"`
+	Retry          RetryConfig          `mapstructure:"retry"`
+	CircuitBreaker CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+}
+
+// CacheConfig holds caching configuration
+type CacheConfig struct {
+	Enabled     bool          `mapstructure:"enabled"`
+	TTL         time.Duration `mapstructure:"ttl"`
+	MaxSize     int           `mapstructure:"max_size"`
+	Compression bool          `mapstructure:"compression"`
+}
+
+// ContextConfig holds context management configuration
+type ContextConfig struct {
+	Enabled                bool `mapstructure:"enabled"`
+	MaxTokens              int  `mapstructure:"max_tokens"`
+	PriorityRecentMessages int  `mapstructure:"priority_recent_messages"`
+	CompressionThreshold   int  `mapstructure:"compression_threshold"`
+	PreserveSystemContext  bool `mapstructure:"preserve_system_context"`
+}
+
+// RetryConfig holds retry logic configuration
+type RetryConfig struct {
+	MaxAttempts       int           `mapstructure:"max_attempts"`
+	BaseDelay         time.Duration `mapstructure:"base_delay"`
+	MaxDelay          time.Duration `mapstructure:"max_delay"`
+	Jitter            bool          `mapstructure:"jitter"`
+	BackoffMultiplier float64       `mapstructure:"backoff_multiplier"`
+}
+
+// CircuitBreakerConfig holds circuit breaker configuration
+type CircuitBreakerConfig struct {
+	FailureThreshold int           `mapstructure:"failure_threshold"`
+	RecoveryTimeout  time.Duration `mapstructure:"timeout"`
 }
 
 // LoadConfig loads configuration from files and environment variables
